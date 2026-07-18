@@ -3,12 +3,12 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  projectId: "high-xerocopy-qpp0d",
-  appId: "1:91733512647:web:251fdaf947155e8112c9e2",
-  apiKey: "AIzaSyAKWH5nYjl1B1votcmx8FDWkNEz40lWEZ0",
-  authDomain: "high-xerocopy-qpp0d.firebaseapp.com",
-  storageBucket: "high-xerocopy-qpp0d.firebasestorage.app",
-  messagingSenderId: "91733512647"
+  projectId: "smart-to-do-ca979",
+  appId: "1:54005926303:web:0b10ed4f6542b8d12a15aa",
+  apiKey: "AIzaSyDqE7R4fpNdxd-27mcxiONSwfcr5wIK48M",
+  authDomain: "smart-to-do-ca979.firebaseapp.com",
+  storageBucket: "smart-to-do-ca979.firebasestorage.app",
+  messagingSenderId: "54005926303"
 };
 
 // Initialize Firebase

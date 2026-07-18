@@ -1,12 +1,12 @@
 {
-  "projectId": "high-xerocopy-qpp0d",
-  "appId": "1:91733512647:web:251fdaf947155e8112c9e2",
-  "apiKey": "AIzaSyAKWH5nYjl1B1votcmx8FDWkNEz40lWEZ0",
-  "authDomain": "high-xerocopy-qpp0d.firebaseapp.com",
+  "projectId": "smart-to-do-ca979",
+  "appId": "1:54005926303:web:0b10ed4f6542b8d12a15aa",
+  "apiKey": "AIzaSyDqE7R4fpNdxd-27mcxiONSwfcr5wIK48M",
+  "authDomain": "smart-to-do-ca979.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-smarttodolist-5036ab7f-38d2-4ce5-aade-b818842c869f",
-  "storageBucket": "high-xerocopy-qpp0d.firebasestorage.app",
-  "messagingSenderId": "91733512647",
+  "storageBucket": "smart-to-do-ca979.firebasestorage.app",
+  "messagingSenderId": "54005926303",
   "measurementId": "",
-  "oAuthClientId": "91733512647-q2bkvb900m62fsm3hqp0plj02q4qvm60.apps.googleusercontent.com",
+  "oAuthClientId": "54005926303-6066ql7a80cimgptti6n8ukl4hfboo2m.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }
