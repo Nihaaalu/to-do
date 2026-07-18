@@ -44,6 +44,20 @@ export class LocalAuthService implements IAuthService {
     return this.currentUser || { ...DEFAULT_PROFILE };
   }
 
+  public async signUpWithEmail(email: string, password: string, fullName: string): Promise<UserProfile> {
+    const user = { ...DEFAULT_PROFILE, email, displayName: fullName, name: fullName };
+    this.currentUser = user;
+    return user;
+  }
+
+  public async signInWithEmail(email: string, password: string): Promise<UserProfile> {
+    return this.currentUser || { ...DEFAULT_PROFILE };
+  }
+
+  public async sendPasswordReset(email: string): Promise<void> {
+    console.log('[LOCAL AUTH] Send password reset for', email);
+  }
+
   public async signOut(): Promise<void> {
     // Sign out does nothing in standard offline mode or simply resets
     console.log('[LOCAL AUTH] Sign out requested, maintaining offline session');

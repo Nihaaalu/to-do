@@ -16,6 +16,7 @@ export interface UserProfile {
   enableDailyDigest?: boolean;
   compactMode?: boolean;
   updatedAt?: string;
+  provider?: string;
   notificationPrefs?: {
     minutesBefore30: boolean;
     minutesBefore15: boolean;
@@ -32,6 +33,9 @@ export interface UserSettings {
 
 export interface IAuthService {
   signInWithGoogle(): Promise<UserProfile>;
+  signUpWithEmail(email: string, password: string, fullName: string): Promise<UserProfile>;
+  signInWithEmail(email: string, password: string): Promise<UserProfile>;
+  sendPasswordReset(email: string): Promise<void>;
   signOut(): Promise<void>;
   onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void;
   getCurrentUser(): UserProfile | null;

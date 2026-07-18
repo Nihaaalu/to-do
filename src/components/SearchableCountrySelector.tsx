@@ -106,7 +106,7 @@ export const SearchableCountrySelector: React.FC<SearchableCountrySelectorProps>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full bg-white/[0.015] border border-white/[0.05] hover:bg-white/[0.03] rounded-sm px-3 h-8 text-xs text-white flex items-center justify-between cursor-pointer focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all"
+        className="w-full bg-white/[0.015] border border-white/[0.05] hover:bg-white/[0.03] rounded-xl sm:rounded-sm px-3.5 h-12 sm:h-8 text-sm sm:text-xs text-white flex items-center justify-between cursor-pointer focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all"
         aria-haspopup="listbox"
         aria-expanded={isOpen}
       >

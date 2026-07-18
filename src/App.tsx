@@ -27,7 +27,9 @@ import {
   Folder,
   ShoppingCart,
   Heart,
-  Camera
+  Camera,
+  Menu,
+  X
 } from 'lucide-react';
 
 import { 
@@ -42,12 +44,15 @@ import {
 
 import { Task, UndoAction } from './types';
 import { LocalAuthService, LocalStorageService } from './services/localLayer';
+import { FirebaseAuthService } from './services/firebaseAuthService';
+import { FirebaseStorageService } from './services/firebaseStorageService';
 import { TaskService } from './services/serviceLayer';
 import { CalendarView } from './components/CalendarView';
 import { UserProfile, UserSettings } from './services/interfaces';
 import { countries } from './data/countries';
 import { SearchableCountrySelector } from './components/SearchableCountrySelector';
 import { SearchableTimezoneSelector } from './components/SearchableTimezoneSelector';
+import { AuthScreen } from './components/AuthScreen';
 
 // Helper to format iso date (YYYY-MM-DD) to DD/MM/YYYY
 function formatToDDMMYYYY(isoDateStr: string) {
@@ -196,22 +201,23 @@ const cardVariants = {
 };
 
 export default function App() {
-  // --- OFFLINE SERVICES ---
-  const authService = useRef<LocalAuthService | null>(null);
-  const storageService = useRef<LocalStorageService | null>(null);
+  // --- FIREBASE SERVICES ---
+  const authService = useRef<FirebaseAuthService | null>(null);
+  const storageService = useRef<FirebaseStorageService | null>(null);
   const taskService = useRef<TaskService | null>(null);
 
   if (!authService.current) {
-    authService.current = new LocalAuthService();
-    storageService.current = new LocalStorageService();
+    authService.current = new FirebaseAuthService();
+    storageService.current = new FirebaseStorageService();
     taskService.current = new TaskService(storageService.current);
   }
 
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => authService.current!.getCurrentUser());
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
 
   // UI Local States
   const [swingTab, setSwingTab] = useState<'home' | 'completed' | 'insights' | 'profile' | 'settings'>('home');
-  const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'info' | 'error' }[]>([]);
+  const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'info' | 'error'; showUndo?: boolean }[]>([]);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -224,6 +230,8 @@ export default function App() {
   const [homeCategoryFilter, setHomeCategoryFilter] = useState<'All' | 'Work' | 'Personal' | 'Shopping' | 'Health' | 'Education' | 'Others'>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchType, setSearchType] = useState<'title' | 'id'>('title');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   // Calendar selected filter
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
@@ -247,6 +255,7 @@ export default function App() {
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState<Task | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Add form fields
   const [addTitle, setAddTitle] = useState('');
@@ -288,12 +297,12 @@ export default function App() {
   const [completionStages, setCompletionStages] = useState<Record<number, 'checked' | 'strikethrough' | 'fade' | 'collapse'>>({});
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
 
-  const addToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+  const addToast = (message: string, type: 'success' | 'info' | 'error' = 'success', showUndo = false) => {
     const id = Math.random().toString(36).substr(2, 9);
-    setToasts(prev => [...prev, { id, message, type }]);
+    setToasts(prev => [...prev, { id, message, type, showUndo }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
-    }, 2500);
+    }, showUndo ? 5000 : 3000);
   };
 
   const addTerminalLog = (msg: string) => {
@@ -302,7 +311,7 @@ export default function App() {
 
   // Monitor auth state changes / load local data
   useEffect(() => {
-    addTerminalLog('[SYSTEM] Initializing offline storage engine...');
+    addTerminalLog('[SYSTEM] Initializing Firebase Auth and Storage engine...');
     
     // Setup logging hooks
     taskService.current!.registerTerminalLog(addTerminalLog);
@@ -310,12 +319,18 @@ export default function App() {
       setTasks(updatedTasks);
     });
 
-    const user = authService.current!.getCurrentUser();
-    if (user) {
+    const unsubscribe = authService.current!.onAuthStateChanged((user) => {
       setCurrentUser(user);
-      addTerminalLog('[SYSTEM] Local offline profile active.');
-      loadUserData(user.uid);
-    }
+      setIsAuthChecking(false);
+      if (user) {
+        addTerminalLog('[SYSTEM] Secure cloud workspace active.');
+        loadUserData(user.uid);
+      } else {
+        addTerminalLog('[SYSTEM] Secure workspace signed out.');
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const [tick, setTick] = useState(0);
@@ -336,10 +351,10 @@ export default function App() {
       } else {
         const initialProf: UserProfile = {
           uid,
-          email: 'mahammadnihal12@gmail.com',
-          displayName: 'Nihal',
+          email: currentUser?.email || 'user@example.com',
+          displayName: currentUser?.displayName || currentUser?.email?.split('@')[0] || 'User',
           photoURL: '',
-          name: 'Nihal',
+          name: currentUser?.displayName || currentUser?.email?.split('@')[0] || 'User',
           dob: '',
           gender: 'Unspecified',
           country: getDetectedCountryName(),
@@ -359,6 +374,23 @@ export default function App() {
     } catch (error) {
       addTerminalLog('[ERROR] Failed to load local data.');
       addToast('Data load failed', 'error');
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      addTerminalLog('[SYSTEM] Logging out of secure session...');
+      await authService.current!.signOut();
+      setCurrentUser(null);
+      setTasks([]);
+      setUserProfileData(null);
+      setSwingTab('home');
+      addTerminalLog('[SYSTEM] Successfully logged out.');
+      addToast('Successfully signed out', 'success');
+    } catch (err) {
+      console.error(err);
+      addTerminalLog('[SYSTEM] Log out failed.');
+      addToast('Failed to sign out', 'error');
     }
   };
 
@@ -400,7 +432,7 @@ export default function App() {
 
     try {
       await taskService.current!.editTask(currentUser.uid, showEditModal);
-      addToast('Changes saved', 'success');
+      addToast('Task updated', 'success', true);
       setShowEditModal(null);
     } catch (error) {
       addToast('Failed to update task', 'error');
@@ -434,7 +466,7 @@ export default function App() {
         delete next[taskId];
         return next;
       });
-      addToast('Accomplishment saved to Completed Queue', 'success');
+      addToast('Task completed', 'success', true);
     }, 850);
   };
 
@@ -442,7 +474,7 @@ export default function App() {
     if (!currentUser) return;
     try {
       await taskService.current!.deleteTask(currentUser.uid, taskId);
-      addToast('Task deleted', 'info');
+      addToast('Task deleted', 'info', true);
     } catch (error) {
       addToast('Delete failed', 'error');
     }
@@ -647,6 +679,11 @@ export default function App() {
     });
   }
 
+  // Apply client-side sort direction (Reverse Order)
+  if (sortDirection === 'desc') {
+    processedTasks = [...processedTasks].reverse();
+  }
+
   const processedCompletedTasks = taskService.current!.getProcessedCompletedTasks(
     completedSearchQuery,
     completedSearchType,
@@ -716,6 +753,7 @@ export default function App() {
     const isOverdue = task.status === 'Pending' && parseDateVal(task.dueDate) < today.getTime();
 
     const displayRank = `#${index + 1}`;
+    const showRank = sortBy === 'priority';
 
     return (
       <motion.div
@@ -723,54 +761,157 @@ export default function App() {
         onClick={() => setSelectedTaskId(task.taskId)}
         variants={cardVariants}
         exit={{ opacity: 0, scale: 0.98, y: -4, height: 0, padding: 0, marginTop: 0, marginBottom: 0, overflow: 'hidden' }}
-        className={`px-4 py-3 border-b border-white/[0.03] flex items-center justify-between gap-4 cursor-pointer transition-colors ${cardOpacityClass} ${
-          selectedTaskId === task.taskId ? 'bg-white/[0.03]' : 'bg-transparent hover:bg-white/[0.01]'
-        }`}
+        className={`w-full ${cardOpacityClass}`}
       >
-        <div className="flex items-center gap-3.5 flex-1 min-w-0">
-          <span className="text-[9px] font-medium font-mono text-white/30 bg-white/[0.02] border border-white/[0.04] px-1.5 py-0.5 rounded-sm select-none shrink-0">
-            {displayRank}
-          </span>
-          
-          <div className="min-w-0 flex-1 flex flex-col md:flex-row md:items-center md:gap-4">
-            <h4 className={`text-xs font-semibold tracking-tight ${titleClass} truncate md:w-1/3 shrink-0`}>
-              {task.title}
-            </h4>
-            {task.description ? (
-              <p className={`text-[11px] ${descClass} truncate flex-1`}>
-                {task.description}
-              </p>
-            ) : (
-              <div className="flex-1" />
-            )}
+        {/* DESKTOP CARD VIEW - Unchanged & Pixel-Perfect */}
+        <div className={`hidden lg:flex px-4 py-3 border-b border-white/[0.03] items-center justify-between gap-4 cursor-pointer transition-colors ${
+          selectedTaskId === task.taskId ? 'bg-white/[0.03]' : 'bg-transparent hover:bg-white/[0.01]'
+        }`}>
+          <div className="flex items-center gap-3.5 flex-1 min-w-0">
+            <span className="text-[9px] font-medium font-mono text-white/30 bg-white/[0.02] border border-white/[0.04] px-1.5 py-0.5 rounded-sm select-none shrink-0">
+              {displayRank}
+            </span>
+            
+            <div className="min-w-0 flex-1 flex flex-col md:flex-row md:items-center md:gap-4">
+              <h4 className={`text-xs font-semibold tracking-tight ${titleClass} truncate md:w-1/3 shrink-0`}>
+                {task.title}
+              </h4>
+              {task.description ? (
+                <p className={`text-[11px] ${descClass} truncate flex-1`}>
+                  {task.description}
+                </p>
+              ) : (
+                <div className="flex-1" />
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0 text-[10px] text-white/40 select-none">
+            <span className="flex items-center gap-1 bg-white/[0.015] border border-white/[0.04] px-2 py-0.5 rounded-sm whitespace-nowrap text-[9px] font-semibold tracking-wide uppercase">
+              {task.priority === 3 ? 'High' : task.priority === 2 ? 'Medium' : 'Low'}
+            </span>
+            <span className="flex items-center gap-1 bg-white/[0.015] border border-white/[0.04] px-2 py-0.5 rounded-sm whitespace-nowrap text-[9px]">
+              {getCategoryIcon(task.category)}
+              <span>{task.category}</span>
+            </span>
+            <span className={`flex items-center gap-1.5 bg-white/[0.015] border border-white/[0.04] px-2 py-0.5 rounded-sm whitespace-nowrap text-[9px] ${isOverdue ? 'text-red-400 bg-red-500/5 border-red-500/10' : ''}`}>
+              <Calendar className="w-3 h-3 text-white/30" />
+              <span>
+                {formatDueDateShort(task.dueDate)}
+                {task.dueTime ? ` • ${formatTo12Hour(task.dueTime).replace(/^0/, '')}` : ''}
+              </span>
+            </span>
+
+            <div className="flex items-center gap-1 border-l border-white/[0.04] pl-2 shrink-0">
+              <button
+                onClick={(e) => { e.stopPropagation(); triggerCompleteTask(task.taskId); }}
+                className={`p-1 rounded-sm transition-colors cursor-pointer ${
+                  isCheckIconChecked ? 'text-emerald-400 bg-emerald-500/10' : 'text-white/20 hover:text-emerald-400 hover:bg-white/[0.03]'
+                }`}
+                title="Complete Task"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const parts = task.dueDate.split('/');
+                  const isoDate = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : task.dueDate;
+                  setShowEditModal({ ...task, dueDate: isoDate });
+                }}
+                className="p-1 text-white/20 hover:text-amber-400 hover:bg-white/[0.03] rounded-sm cursor-pointer transition-colors"
+                title="Edit Task"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); triggerDeleteTask(task.taskId); }}
+                className="p-1 text-white/20 hover:text-red-400 hover:bg-white/[0.03] rounded-sm cursor-pointer transition-colors"
+                title="Delete Task"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0 text-[10px] text-white/40 select-none">
-          <span className="flex items-center gap-1 bg-white/[0.015] border border-white/[0.04] px-2 py-0.5 rounded-sm whitespace-nowrap text-[9px] font-semibold tracking-wide uppercase">
-            {task.priority === 3 ? 'High' : task.priority === 2 ? 'Medium' : 'Low'}
-          </span>
-          <span className="flex items-center gap-1 bg-white/[0.015] border border-white/[0.04] px-2 py-0.5 rounded-sm whitespace-nowrap text-[9px]">
-            {getCategoryIcon(task.category)}
-            <span>{task.category}</span>
-          </span>
-          <span className={`flex items-center gap-1.5 bg-white/[0.015] border border-white/[0.04] px-2 py-0.5 rounded-sm whitespace-nowrap text-[9px] ${isOverdue ? 'text-red-400 bg-red-500/5 border-red-500/10' : ''}`}>
-            <Calendar className="w-3 h-3 text-white/30" />
-            <span>
-              {formatDueDateShort(task.dueDate)}
-              {task.dueTime ? ` • ${formatTo12Hour(task.dueTime).replace(/^0/, '')}` : ''}
-            </span>
-          </span>
+        {/* MOBILE CARD VIEW - Hierarchical, high contrast, clean spacing */}
+        <div className={`lg:hidden px-6 pt-6 pb-7 border rounded-xl transition-all flex flex-col gap-3.5 select-none ${
+          selectedTaskId === task.taskId
+            ? 'bg-[#121214] border-[#7C5CFF]/30 shadow-md shadow-[#7C5CFF]/5'
+            : 'bg-white/[0.015] border-white/[0.05] hover:bg-white/[0.03]'
+        }`}>
+          {/* Row 1: Task Title & (optional) Rank Badge */}
+          <div className="flex items-start gap-2.5">
+            {showRank && (
+              <span className="text-[10px] font-bold font-mono text-white/40 bg-white/[0.03] border border-white/[0.06] px-1.5 py-0.5 rounded-md select-none shrink-0 mt-0.5">
+                {displayRank}
+              </span>
+            )}
+            <div className="space-y-1 min-w-0 flex-1">
+              <h4 className={`text-base font-bold tracking-tight text-white leading-snug break-words ${titleClass}`}>
+                {task.title}
+              </h4>
+              {task.description && (
+                <p className={`text-xs leading-relaxed text-white/40 break-words ${descClass}`}>
+                  {task.description}
+                </p>
+              )}
+            </div>
+          </div>
 
-          <div className="flex items-center gap-1 border-l border-white/[0.04] pl-2 shrink-0">
+          {/* Row 2: Category Badge */}
+          <div className="flex items-center">
+            <span className="flex items-center gap-1.5 bg-white/[0.03] border border-white/[0.06] px-2.5 py-1 rounded-md text-xs text-white/60">
+              {getCategoryIcon(task.category)}
+              <span>{task.category}</span>
+            </span>
+          </div>
+
+          {/* Row 3: Due Date + Due Time */}
+          <div className="flex items-center">
+            <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-mono ${
+              isOverdue
+                ? 'text-red-300 bg-white/[0.06] border-white/[0.08] font-bold'
+                : 'text-white/50 bg-white/[0.02] border border-white/[0.04]'
+            }`}>
+              {isOverdue ? (
+                <Clock className="w-3.5 h-3.5 text-red-300 shrink-0" />
+              ) : (
+                <Calendar className="w-3.5 h-3.5 text-white/30" />
+              )}
+              <span>
+                {formatDueDateShort(task.dueDate)}
+                {task.dueTime ? ` • ${formatTo12Hour(task.dueTime).replace(/^0/, '')}` : ''}
+              </span>
+            </span>
+          </div>
+
+          {/* Row 4: Priority Badge */}
+          <div className="flex items-center">
+            <span className={`text-[10px] font-bold tracking-wider uppercase px-2.5 py-1 rounded-md border ${
+              task.priority === 3
+                ? 'text-red-400 bg-red-500/5 border-red-500/10'
+                : task.priority === 2
+                ? 'text-amber-400 bg-amber-500/5 border-amber-500/10'
+                : 'text-blue-400 bg-blue-500/5 border-blue-500/10'
+            }`}>
+              {task.priority === 3 ? 'High' : task.priority === 2 ? 'Medium' : 'Low'}
+            </span>
+          </div>
+
+          {/* Row 5: Actions - Compact icon buttons with 48px height touch targets */}
+          <div className="flex items-center gap-3 border-t border-white/[0.04] pt-4 shrink-0 justify-end">
             <button
               onClick={(e) => { e.stopPropagation(); triggerCompleteTask(task.taskId); }}
-              className={`p-1 rounded-sm transition-colors cursor-pointer ${
-                isCheckIconChecked ? 'text-emerald-400 bg-emerald-500/10' : 'text-white/20 hover:text-emerald-400 hover:bg-white/[0.03]'
+              className={`h-12 w-12 flex items-center justify-center rounded-xl cursor-pointer transition-all ${
+                isCheckIconChecked
+                  ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20'
+                  : 'text-white/30 bg-white/[0.01] border border-white/[0.04] hover:text-emerald-400 hover:bg-emerald-500/10 hover:border-emerald-500/20'
               }`}
               title="Complete Task"
             >
-              <CheckCircle2 className="w-3.5 h-3.5" />
+              <CheckCircle2 className="w-5 h-5" />
             </button>
             <button
               onClick={(e) => {
@@ -779,17 +920,17 @@ export default function App() {
                 const isoDate = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : task.dueDate;
                 setShowEditModal({ ...task, dueDate: isoDate });
               }}
-              className="p-1 text-white/20 hover:text-amber-400 hover:bg-white/[0.03] rounded-sm cursor-pointer transition-colors"
+              className="h-12 w-12 flex items-center justify-center rounded-xl text-white/30 bg-white/[0.01] border border-white/[0.04] hover:text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/20 transition-all cursor-pointer"
               title="Edit Task"
             >
-              <Edit3 className="w-3.5 h-3.5" />
+              <Edit3 className="w-5 h-5" />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); triggerDeleteTask(task.taskId); }}
-              className="p-1 text-white/20 hover:text-red-400 hover:bg-white/[0.03] rounded-sm cursor-pointer transition-colors"
+              className="h-12 w-12 flex items-center justify-center rounded-xl text-white/30 bg-white/[0.01] border border-white/[0.04] hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20 transition-all cursor-pointer"
               title="Delete Task"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Trash2 className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -805,11 +946,148 @@ export default function App() {
     settings: Settings
   };
 
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen w-full bg-[#000000] text-white flex flex-col justify-center items-center select-none">
+        <div className="w-10 h-10 border-2 border-[#7C5CFF]/30 border-t-[#7C5CFF] rounded-full animate-spin mb-4" />
+        <span className="text-[10px] font-mono text-white/40 tracking-widest uppercase">SECURE WORKSPACE INITIALIZING...</span>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthScreen 
+        authService={authService.current!} 
+        onAuthSuccess={(user) => {
+          setCurrentUser(user);
+          addTerminalLog(`[SYSTEM] Welcome back, ${user.displayName || user.email}`);
+        }} 
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0B0B0C] text-white/90 grid grid-cols-1 lg:grid-cols-[240px_1fr] font-sans select-none selection:bg-[#7C5CFF]/30 selection:text-white overflow-hidden">
       
+      {/* MOBILE NAVIGATION DRAWER */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            {/* Overlay */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-black z-50 lg:hidden"
+            />
+            
+            {/* Drawer */}
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed top-0 left-0 bottom-0 w-[280px] bg-black border-r border-white/[0.06] z-50 p-5 flex flex-col justify-between lg:hidden shadow-2xl"
+            >
+              <div className="flex-1 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-8">
+                    <span className="text-[10px] font-bold text-[#7C5CFF] tracking-widest uppercase font-mono pl-1">
+                      To-Do List
+                    </span>
+                    <button
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className="p-1.5 text-white/40 hover:text-white hover:bg-white/[0.04] rounded-lg transition-colors cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <span className="text-[10px] font-bold text-white/20 tracking-wider uppercase pl-3 block mb-4 select-none font-mono">
+                    Workspace
+                  </span>
+
+                  <div className="flex flex-col gap-1.5">
+                    {[
+                      { id: 'home', label: 'Home' },
+                      { id: 'completed', label: 'Completed' },
+                      { id: 'insights', label: 'Insights' }
+                    ].map(btn => {
+                      const isActive = swingTab === btn.id;
+                      const IconComponent = sidebarIcons[btn.id];
+                      return (
+                        <button
+                          key={btn.id}
+                          onClick={() => {
+                            handleTabChange(btn.id as any);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className={`w-full py-3 px-4 rounded-xl text-left text-sm font-medium transition-all duration-150 cursor-pointer flex items-center select-none ${
+                            isActive ? 'text-white bg-white/[0.06] font-semibold' : 'text-white/40 hover:text-white hover:bg-white/[0.02]'
+                          }`}
+                        >
+                          <span className="flex items-center gap-3">
+                            {IconComponent && <IconComponent className={`w-4.5 h-4.5 ${isActive ? 'text-white' : 'text-white/40'}`} />}
+                            {btn.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-4 border-t border-white/[0.04]">
+                  <div className="flex flex-col gap-1.5">
+                    {[
+                      { id: 'profile', label: 'Profile' },
+                      { id: 'settings', label: 'Settings' }
+                    ].map(btn => {
+                      const isActive = swingTab === btn.id;
+                      const IconComponent = sidebarIcons[btn.id];
+                      return (
+                        <button
+                          key={btn.id}
+                          onClick={() => {
+                            handleTabChange(btn.id as any);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className={`w-full py-3 px-4 rounded-xl text-left text-sm font-medium transition-all duration-150 cursor-pointer flex items-center select-none ${
+                            isActive ? 'text-white bg-white/[0.06] font-semibold' : 'text-white/40 hover:text-white hover:bg-white/[0.02]'
+                          }`}
+                        >
+                          <span className="flex items-center gap-3">
+                            {IconComponent && <IconComponent className={`w-4.5 h-4.5 ${isActive ? 'text-white' : 'text-white/40'}`} />}
+                            {btn.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="px-3 pt-1 flex flex-col gap-1.5 select-none text-[9px] font-mono text-white/20">
+                    <span>Secure Cloud Workspace</span>
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        handleLogout();
+                      }}
+                      className="w-full mt-2 text-left text-[11px] font-semibold text-red-400/80 hover:text-red-400 cursor-pointer flex items-center gap-2"
+                    >
+                      <LogOut className="w-3.5 h-3.5 text-red-400/60" />
+                      <span>Log Out</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* DESKTOP SIDEBAR - continuous from top to bottom */}
-      <div className="w-full lg:w-[240px] bg-[#000000] border-r border-white/[0.04] p-5 flex flex-col justify-between shrink-0 h-auto lg:h-screen lg:sticky lg:top-0 select-none">
+      <div className="hidden lg:flex w-[240px] bg-[#000000] border-r border-white/[0.04] p-5 flex-col justify-between shrink-0 h-screen sticky top-0 select-none">
         <div className="flex-1 flex flex-col justify-between">
           {/* TOP NAVIGATION GROUP */}
           <div>
@@ -870,49 +1148,121 @@ export default function App() {
             </div>
 
             {/* Connected Indicator near Profile Section */}
-            <div className="px-3 pt-1 select-none text-[9px] font-mono text-white/20">
-              Offline Workspace
+            <div className="px-3 pt-1 flex flex-col gap-1.5 select-none text-[9px] font-mono text-white/20">
+              <span>Secure Cloud Workspace</span>
+              <button
+                onClick={handleLogout}
+                className="w-full mt-2 text-left text-[11px] font-semibold text-red-400/80 hover:text-red-400 cursor-pointer flex items-center gap-2"
+              >
+                <LogOut className="w-3.5 h-3.5 text-red-400/60" />
+                <span>Log Out</span>
+              </button>
             </div>
           </div>
         </div>
       </div>
 
       {/* MAIN WORKSPACE VIEWPORT */}
-      <div className="flex-1 flex flex-col h-screen overflow-y-auto bg-[#0B0B0C] p-6 md:p-12">
-        <div className="w-full max-w-[1200px] mx-auto flex-1 flex flex-col justify-start">
+      <div className="flex-1 flex flex-col h-screen overflow-y-auto bg-[#0B0B0C] no-scrollbar-mobile">
+        
+        {/* MOBILE TOP BAR */}
+        <div className="lg:hidden flex items-center justify-between bg-[#000000] border-b border-white/[0.04] h-14 px-4 sticky top-0 z-40 select-none shrink-0">
+          <button
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="p-2 -ml-2 text-white/60 hover:text-white hover:bg-white/[0.04] rounded-lg transition-colors cursor-pointer"
+            aria-label="Open navigation menu"
+          >
+            <Menu className="w-6 h-6" />
+          </button>
+          <span className="text-xs font-bold tracking-widest uppercase text-white/90">
+            To-Do List
+          </span>
+          <div className="w-10 h-10 flex items-center justify-center">
+            {/* Quick avatar inside top bar */}
+            <div 
+              onClick={() => handleTabChange('profile')}
+              className="w-7 h-7 rounded-full overflow-hidden border border-white/10 cursor-pointer"
+            >
+              {userProfileData?.photoURL ? (
+                <img 
+                  src={userProfileData.photoURL} 
+                  alt="Profile" 
+                  className="w-full h-full object-cover rounded-full"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-[#7C5CFF] to-indigo-600 flex items-center justify-center text-[10px] font-bold text-white uppercase select-none">
+                  {getInitials(userProfileData?.name || userProfileData?.displayName || 'U')}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="w-full max-w-[1200px] mx-auto flex-1 flex flex-col justify-start p-4 sm:p-6 lg:p-12">
             
             {/* SWING SUB-VIEW: HOME */}
             {swingTab === 'home' && (
               <div className="space-y-5 animate-fadeIn">
-                {/* Header greeting & Undo Action */}
-                <div className="flex items-center justify-between border-b border-white/[0.04] pb-3">
-                  <div className="flex items-center gap-3">
-                    {(() => {
-                      const { greeting } = getDynamicGreeting(userProfileData, currentUser, tasks);
-                      const today = new Date();
-                      const dateStr = today.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                      return (
-                        <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2 select-none">
+                {/* Header greeting & Subtitle */}
+                <div className="flex flex-col gap-1 pb-4 border-b border-white/[0.04]">
+                  {(() => {
+                    const { greeting } = getDynamicGreeting(userProfileData, currentUser, tasks);
+                    const today = new Date();
+                    const dateStr = today.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+                    return (
+                      <>
+                        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white select-none">
                           {greeting}
-                          <span className="text-white/40 font-mono text-xs font-normal">({dateStr})</span>
-                        </h2>
-                      );
-                    })()}
-                  </div>
-                  
-                  {/* Undo Trigger */}
-                  <button
-                    onClick={handleUndo}
-                    className="flex items-center gap-1.5 bg-transparent hover:bg-white/[0.03] border border-white/[0.05] px-2.5 py-1 rounded-sm text-[10px] font-semibold text-white/50 hover:text-white cursor-pointer transition-colors shrink-0"
-                    title="Revert last transaction"
-                  >
-                    <Undo2 className="w-3 h-3" />
-                    <span>Undo</span>
-                  </button>
+                        </h1>
+                        <p className="text-white/40 text-xs sm:text-sm font-medium flex items-center gap-1.5 pl-0.5">
+                          <Calendar className="w-3.5 h-3.5 text-white/30" />
+                          <span>{dateStr}</span>
+                        </p>
+                      </>
+                    );
+                  })()}
                 </div>
 
-                {/* Single lightweight summary row */}
-                <div className="flex flex-wrap items-center gap-x-2 text-[10px] font-semibold font-mono uppercase tracking-wider text-white/30 py-0.5 select-none">
+                {/* STATS (MOBILE) - Redesigned into compact scannable pills with elegant styling */}
+                <div className="lg:hidden grid grid-cols-2 gap-2.5 w-full pt-1 select-none">
+                  <div className="bg-white/[0.015] border border-white/[0.04] px-3.5 py-2.5 rounded-xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider font-mono truncate">Completed</span>
+                    </div>
+                    <span className="text-xs font-bold text-emerald-400 font-mono">{smartStats.completedToday}</span>
+                  </div>
+
+                  <div className="bg-white/[0.015] border border-white/[0.04] px-3.5 py-2.5 rounded-xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Clock className="w-3.5 h-3.5 text-[#7C5CFF] shrink-0" />
+                      <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider font-mono truncate">Pending</span>
+                    </div>
+                    <span className="text-xs font-bold text-white font-mono">{smartStats.pendingToday}</span>
+                  </div>
+
+                  <div className="bg-white/[0.015] border border-white/[0.04] px-3.5 py-2.5 rounded-xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <X className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                      <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider font-mono truncate">Overdue</span>
+                    </div>
+                    <span className={`text-xs font-bold font-mono ${smartStats.overdue > 0 ? 'text-red-400' : 'text-white/40'}`}>{smartStats.overdue}</span>
+                  </div>
+
+                  <div className="bg-white/[0.015] border border-white/[0.04] px-3.5 py-2.5 rounded-xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <TrendingUp className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                      <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider truncate font-sans">Progress</span>
+                    </div>
+                    <span className="text-xs font-bold text-indigo-400 font-mono">
+                      {smartStats.todayProgress.total > 0 ? Math.round((smartStats.todayProgress.completed / smartStats.todayProgress.total) * 100) : 0}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Single lightweight summary row (DESKTOP) */}
+                <div className="hidden lg:flex flex-wrap items-center gap-x-2 text-[10px] font-semibold font-mono uppercase tracking-wider text-white/30 py-0.5 select-none">
                   <span>{smartStats.completedToday} Completed Today</span>
                   <span className="text-white/10">•</span>
                   <span>{smartStats.pendingToday} Pending</span>
@@ -922,8 +1272,8 @@ export default function App() {
                   <span>Today's Progress {smartStats.todayProgress.total > 0 ? Math.round((smartStats.todayProgress.completed / smartStats.todayProgress.total) * 100) : 0}%</span>
                 </div>
 
-                {/* Unified Toolbar */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-white/[0.015] border border-white/[0.04] rounded p-1 w-full text-xs">
+                {/* Unified Toolbar (DESKTOP) */}
+                <div className="hidden lg:flex flex-row items-center gap-2 bg-white/[0.015] border border-white/[0.04] rounded p-1 w-full text-xs">
                   {/* Search input - occupies left side */}
                   <div className="relative flex-1 flex items-center h-8">
                     <Search className="absolute left-2.5 w-3.5 h-3.5 text-white/30" />
@@ -1012,6 +1362,187 @@ export default function App() {
                       <Plus className="w-3.5 h-3.5" />
                       <span>Add Task</span>
                     </button>
+                  </div>
+                </div>
+
+                {/* MOBILE ADD TASK & FILTERS CONTROLS */}
+                <div className="lg:hidden flex flex-col gap-3.5 w-full">
+                  {/* Create Task Button (Always visible at top, easy to click) */}
+                  <button
+                    onClick={() => {
+                      setAddDueDate(selectedCalendarDate || '');
+                      setShowAddModal(true);
+                    }}
+                    className="w-full h-11 bg-[#7C5CFF] hover:bg-[#8D72FF] text-white text-xs sm:text-sm font-bold rounded-xl cursor-pointer flex items-center justify-center gap-2 transition-all shadow-lg shadow-[#7C5CFF]/15 active:scale-[0.98]"
+                  >
+                    <Plus className="w-4.5 h-4.5" />
+                    <span>Create New Task</span>
+                  </button>
+
+                  {/* Search Bar + Sliders/Filters Toggle Button */}
+                  <div className="relative w-full flex flex-col gap-2">
+                    <div className="flex items-center gap-2 w-full">
+                      {/* Search Field */}
+                      <div className="relative flex-1 h-11 bg-white/[0.02] border border-white/[0.06] rounded-xl flex items-center px-3.5 focus-within:border-white/15 transition-colors">
+                        <Search className="w-4 h-4 text-white/40 mr-2.5 shrink-0" />
+                        <input
+                          type="text"
+                          placeholder="Search tasks..."
+                          value={searchQuery}
+                          onChange={e => setSearchQuery(e.target.value)}
+                          className="w-full h-5 bg-transparent text-xs font-semibold text-white placeholder-white/20 border-0 p-0 m-0 focus:ring-0 focus:outline-none self-center leading-none"
+                        />
+                        {searchQuery && (
+                          <button onClick={() => setSearchQuery('')} className="text-white/40 hover:text-white p-1 text-sm cursor-pointer ml-1 shrink-0">✕</button>
+                        )}
+                      </div>
+
+                      {/* Filter & Sort Button */}
+                      <button
+                        onClick={() => setIsFilterOpen(!isFilterOpen)}
+                        className={`h-11 px-4 rounded-xl border flex items-center justify-center gap-2 cursor-pointer transition-all text-xs font-semibold select-none shrink-0 ${
+                          isFilterOpen || filterBy !== 'All Active' || homeCategoryFilter !== 'All' || homePriorityFilter !== 'All' || sortBy !== 'priority'
+                            ? 'bg-[#7C5CFF]/15 border-[#7C5CFF]/30 text-[#8D72FF]'
+                            : 'bg-white/[0.02] border-white/[0.06] text-white/60 hover:text-white hover:bg-white/[0.04]'
+                        }`}
+                      >
+                        <SlidersHorizontal className="w-4 h-4 shrink-0" />
+                        <span className="hidden sm:inline">Filter & Sort</span>
+                        {(filterBy !== 'All Active' || homeCategoryFilter !== 'All' || homePriorityFilter !== 'All' || sortBy !== 'priority') && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#7C5CFF] shrink-0" />
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Filter & Sort Dropdown panel */}
+                    <AnimatePresence>
+                      {isFilterOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -8 }}
+                          transition={{ duration: 0.15 }}
+                          className="absolute top-12 right-0 left-0 bg-[#0F0F11] border border-white/[0.06] rounded-xl p-4 shadow-2xl z-30 space-y-4 animate-fadeIn"
+                        >
+                          <div className="flex items-center justify-between pb-2 border-b border-white/[0.04]">
+                            <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest font-mono">Filter & Sort Settings</span>
+                            <button
+                              onClick={() => {
+                                setFilterBy('All Active');
+                                setHomeCategoryFilter('All');
+                                setHomePriorityFilter('All');
+                                setSortBy('priority');
+                                setSortDirection('asc');
+                                setSearchType('title');
+                              }}
+                              className="text-[9px] font-bold text-[#7C5CFF] hover:underline font-mono cursor-pointer"
+                            >
+                              Reset All
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3.5">
+                            {/* Search Type */}
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[9px] font-bold font-mono text-white/30 uppercase tracking-wider pl-1">Search Type</span>
+                              <select
+                                value={searchType}
+                                onChange={e => setSearchType(e.target.value as any)}
+                                className="w-full h-10 bg-white/[0.02] border border-white/[0.05] rounded-lg px-2.5 text-xs text-white/80 focus:outline-none cursor-pointer"
+                              >
+                                <option value="title" className="bg-[#0D0D0E]">By Title</option>
+                                <option value="id" className="bg-[#0D0D0E]">By ID</option>
+                              </select>
+                            </div>
+
+                            {/* Status */}
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[9px] font-bold font-mono text-white/30 uppercase tracking-wider pl-1">Status</span>
+                              <select
+                                value={filterBy}
+                                onChange={e => setFilterBy(e.target.value as any)}
+                                className="w-full h-10 bg-white/[0.02] border border-white/[0.05] rounded-lg px-2.5 text-xs text-white/80 focus:outline-none cursor-pointer"
+                              >
+                                <option value="All Active" className="bg-[#0D0D0E]">All Active</option>
+                                <option value="Pending" className="bg-[#0D0D0E]">Pending</option>
+                                <option value="Overdue" className="bg-[#0D0D0E]">Overdue</option>
+                              </select>
+                            </div>
+
+                            {/* Category */}
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[9px] font-bold font-mono text-white/30 uppercase tracking-wider pl-1">Category</span>
+                              <select
+                                value={homeCategoryFilter}
+                                onChange={e => setHomeCategoryFilter(e.target.value as any)}
+                                className="w-full h-10 bg-white/[0.02] border border-white/[0.05] rounded-lg px-2.5 text-xs text-white/80 focus:outline-none cursor-pointer"
+                              >
+                                <option value="All" className="bg-[#0D0D0E]">All Categories</option>
+                                <option value="Work" className="bg-[#0D0D0E]">Work</option>
+                                <option value="Personal" className="bg-[#0D0D0E]">Personal</option>
+                                <option value="Shopping" className="bg-[#0D0D0E]">Shopping</option>
+                                <option value="Health" className="bg-[#0D0D0E]">Health</option>
+                                <option value="Education" className="bg-[#0D0D0E]">Education</option>
+                                <option value="Others" className="bg-[#0D0D0E]">Others</option>
+                              </select>
+                            </div>
+
+                            {/* Priority */}
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[9px] font-bold font-mono text-white/30 uppercase tracking-wider pl-1">Priority</span>
+                              <select
+                                value={homePriorityFilter}
+                                onChange={e => setHomePriorityFilter(e.target.value as any)}
+                                className="w-full h-10 bg-white/[0.02] border border-white/[0.05] rounded-lg px-2.5 text-xs text-white/80 focus:outline-none cursor-pointer"
+                              >
+                                <option value="All" className="bg-[#0D0D0E]">All Priorities</option>
+                                <option value="High" className="bg-[#0D0D0E]">High</option>
+                                <option value="Medium" className="bg-[#0D0D0E]">Medium</option>
+                                <option value="Low" className="bg-[#0D0D0E]">Low</option>
+                              </select>
+                            </div>
+
+                            {/* Sort By */}
+                            <div className="flex flex-col gap-1 col-span-2">
+                              <span className="text-[9px] font-bold font-mono text-white/30 uppercase tracking-wider pl-1">Sort By</span>
+                              <select
+                                value={sortBy}
+                                onChange={e => setSortBy(e.target.value as any)}
+                                className="w-full h-10 bg-white/[0.02] border border-white/[0.05] rounded-lg px-2.5 text-xs text-white/80 focus:outline-none cursor-pointer"
+                              >
+                                <option value="priority" className="bg-[#0D0D0E]">Highest Priority First</option>
+                                <option value="duedate" className="bg-[#0D0D0E]">Earliest Due Date First</option>
+                                <option value="id" className="bg-[#0D0D0E]">Oldest Created First</option>
+                                <option value="title" className="bg-[#0D0D0E]">Alphabetical (A to Z)</option>
+                              </select>
+                            </div>
+
+                            {/* Sort Direction */}
+                            <div className="flex flex-col gap-1 col-span-2">
+                              <span className="text-[9px] font-bold font-mono text-white/30 uppercase tracking-wider pl-1">Sort Direction</span>
+                              <div className="grid grid-cols-2 gap-1.5 p-0.5 bg-white/[0.01] border border-white/[0.04] rounded-lg text-[10px] font-bold">
+                                <button
+                                  onClick={() => setSortDirection('asc')}
+                                  className={`py-1.5 rounded-md cursor-pointer transition-colors ${
+                                    sortDirection === 'asc' ? 'bg-[#7C5CFF]/15 text-[#8D72FF]' : 'text-white/40 hover:text-white'
+                                  }`}
+                                >
+                                  Standard Order
+                                </button>
+                                <button
+                                  onClick={() => setSortDirection('desc')}
+                                  className={`py-1.5 rounded-md cursor-pointer transition-colors ${
+                                    sortDirection === 'desc' ? 'bg-[#7C5CFF]/15 text-[#8D72FF]' : 'text-white/40 hover:text-white'
+                                  }`}
+                                >
+                                  Reverse Order
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </div>
 
@@ -1154,9 +1685,9 @@ export default function App() {
                     {completedCount} Completed
                   </span>
                 </div>
- 
-                {/* Unified Toolbar Completed */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-white/[0.015] border border-white/[0.04] rounded p-1 w-full text-xs">
+
+                {/* Unified Toolbar Completed (DESKTOP) */}
+                <div className="hidden lg:flex flex-row items-center gap-2 bg-white/[0.015] border border-white/[0.04] rounded p-1 w-full text-xs">
                   {/* Search input - occupies left side */}
                   <div className="relative flex-1 flex items-center h-8">
                     <Search className="absolute left-2.5 w-3.5 h-3.5 text-white/30" />
@@ -1197,13 +1728,58 @@ export default function App() {
                     </select>
                   </div>
                 </div>
+
+                {/* Unified Toolbar Completed (MOBILE) */}
+                <div className="lg:hidden flex flex-col gap-3.5 w-full">
+                  <div className="relative w-full h-12 bg-white/[0.02] border border-white/[0.06] rounded-xl flex items-center px-3.5">
+                    <Search className="w-4 h-4 text-white/40 mr-2 shrink-0" />
+                    <input
+                      type="text"
+                      placeholder="Search completed tasks..."
+                      value={completedSearchQuery}
+                      onChange={e => setCompletedSearchQuery(e.target.value)}
+                      className="w-full h-full bg-transparent text-sm text-white placeholder-white/30 focus:outline-none"
+                    />
+                    {completedSearchQuery && (
+                      <button onClick={() => setCompletedSearchQuery('')} className="text-white/40 hover:text-white p-2 text-sm cursor-pointer">✕</button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px] font-bold font-mono text-white/30 uppercase tracking-wider pl-1">Search Type</span>
+                      <select
+                        value={completedSearchType}
+                        onChange={e => setCompletedSearchType(e.target.value as any)}
+                        className="w-full h-12 bg-white/[0.02] border border-white/[0.06] rounded-xl px-3 text-xs text-white/80 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none cursor-pointer"
+                      >
+                        <option value="title" className="bg-[#0D0D0E]">By Title</option>
+                        <option value="id" className="bg-[#0D0D0E]">By ID</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px] font-bold font-mono text-white/30 uppercase tracking-wider pl-1">Priority</span>
+                      <select
+                        value={completedPriorityFilter}
+                        onChange={e => setCompletedPriorityFilter(e.target.value as any)}
+                        className="w-full h-12 bg-white/[0.02] border border-white/[0.06] rounded-xl px-3 text-xs text-white/80 focus:border-white/25 focus:ring-1 focus:ring-white/20 focus:outline-none cursor-pointer"
+                      >
+                        <option value="All" className="bg-[#0D0D0E]">All Priorities</option>
+                        <option value="High" className="bg-[#0D0D0E]">High</option>
+                        <option value="Medium" className="bg-[#0D0D0E]">Medium</option>
+                        <option value="Low" className="bg-[#0D0D0E]">Low</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
  
                 {/* Completed cards list */}
                 <motion.div
                   variants={containerVariants}
                   initial="hidden"
                   animate="visible"
-                  className="space-y-0.5"
+                  className="space-y-3"
                 >
                   <AnimatePresence mode="popLayout">
                     {processedCompletedTasks.length === 0 ? (
@@ -1229,53 +1805,107 @@ export default function App() {
                             key={task.taskId}
                             variants={cardVariants}
                             exit={{ opacity: 0, scale: 0.98, y: -4, height: 0, padding: 0, marginTop: 0, marginBottom: 0, overflow: 'hidden' }}
-                            className="px-4 py-3 border-b border-white/[0.03] flex items-center justify-between gap-4 transition-colors bg-transparent hover:bg-white/[0.01]"
+                            className="w-full"
                           >
-                            <div className="flex items-center gap-3.5 flex-1 min-w-0">
-                              <span className="text-[9px] font-medium font-mono text-white/30 bg-white/[0.02] border border-white/[0.04] px-1.5 py-0.5 rounded-sm select-none shrink-0">
-                                {displayRank}
-                              </span>
-                              
-                              <div className="min-w-0 flex-1 flex flex-col md:flex-row md:items-center md:gap-4">
-                                <h4 className="text-xs font-semibold tracking-tight text-white/30 line-through truncate md:w-1/3 shrink-0">
-                                  {task.title}
-                                </h4>
-                                {task.description ? (
-                                  <p className="text-[11px] text-white/20 truncate line-through flex-1">
-                                    {task.description}
-                                  </p>
-                                ) : (
-                                  <div className="flex-1" />
+                            {/* DESKTOP VIEW - Unchanged */}
+                            <div className="hidden lg:flex px-4 py-3 border-b border-white/[0.03] items-center justify-between gap-4 transition-colors bg-transparent hover:bg-white/[0.01]">
+                              <div className="flex items-center gap-3.5 flex-1 min-w-0">
+                                <span className="text-[9px] font-medium font-mono text-white/30 bg-white/[0.02] border border-white/[0.04] px-1.5 py-0.5 rounded-sm select-none shrink-0">
+                                  {displayRank}
+                                </span>
+                                
+                                <div className="min-w-0 flex-1 flex flex-col md:flex-row md:items-center md:gap-4">
+                                  <h4 className="text-xs font-semibold tracking-tight text-white/30 line-through truncate md:w-1/3 shrink-0">
+                                    {task.title}
+                                  </h4>
+                                  {task.description ? (
+                                    <p className="text-[11px] text-white/20 truncate line-through flex-1">
+                                      {task.description}
+                                    </p>
+                                  ) : (
+                                    <div className="flex-1" />
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2.5 shrink-0 text-[10px] text-white/40 select-none">
+                                <span className="flex items-center gap-1 bg-white/[0.015] border border-white/[0.04] px-2 py-0.5 rounded-sm whitespace-nowrap text-[9px] font-semibold tracking-wide uppercase">
+                                  {task.priority === 3 ? 'High' : task.priority === 2 ? 'Medium' : 'Low'}
+                                </span>
+                                <span className="flex items-center gap-1 bg-white/[0.015] border border-white/[0.04] px-2 py-0.5 rounded-sm whitespace-nowrap text-[9px]">
+                                  {getCategoryIcon(task.category)}
+                                  <span>{task.category}</span>
+                                </span>
+                                {task.completedDate && (
+                                  <span className="flex items-center gap-1 text-emerald-400 bg-emerald-500/5 px-2 py-0.5 rounded-sm border border-emerald-500/10 font-mono whitespace-nowrap text-[9px]">
+                                    ✓ Completed: {task.completedDate}
+                                  </span>
                                 )}
+
+                                <div className="flex items-center gap-1 border-l border-white/[0.04] pl-2 shrink-0">
+                                  <button
+                                    onClick={() => triggerRevertComplete(task.taskId)}
+                                    className="text-[9px] font-semibold px-2 py-1 bg-white/[0.015] border border-white/[0.05] hover:bg-white/[0.03] text-white/50 hover:text-white rounded-sm cursor-pointer transition-colors"
+                                  >
+                                    Restore
+                                  </button>
+                                  <button
+                                    onClick={() => triggerDeleteTask(task.taskId)}
+                                    className="p-1 text-white/20 hover:text-red-400 hover:bg-white/[0.03] rounded-sm cursor-pointer transition-colors"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </div>
                             </div>
- 
-                            <div className="flex items-center gap-2.5 shrink-0 text-[10px] text-white/40 select-none">
-                              <span className="flex items-center gap-1 bg-white/[0.015] border border-white/[0.04] px-2 py-0.5 rounded-sm whitespace-nowrap text-[9px] font-semibold tracking-wide uppercase">
-                                {task.priority === 3 ? 'High' : task.priority === 2 ? 'Medium' : 'Low'}
-                              </span>
-                              <span className="flex items-center gap-1 bg-white/[0.015] border border-white/[0.04] px-2 py-0.5 rounded-sm whitespace-nowrap text-[9px]">
-                                {getCategoryIcon(task.category)}
-                                <span>{task.category}</span>
-                              </span>
-                              {task.completedDate && (
-                                <span className="flex items-center gap-1 text-emerald-400 bg-emerald-500/5 px-2 py-0.5 rounded-sm border border-emerald-500/10 font-mono whitespace-nowrap text-[9px]">
-                                  ✓ Completed: {task.completedDate}
+
+                            {/* MOBILE VIEW - Beautifully stacked & comfortable */}
+                            <div className="lg:hidden p-4 bg-[#121214]/50 border border-white/[0.04] rounded-2xl flex flex-col gap-3.5 select-none my-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold font-mono text-white/30 bg-white/[0.02] border border-white/[0.05] px-2.5 py-0.5 rounded-md">
+                                  {displayRank}
                                 </span>
-                              )}
- 
-                              <div className="flex items-center gap-1 border-l border-white/[0.04] pl-2 shrink-0">
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-white/40 border border-white/[0.08] px-2.5 py-1 rounded-md">
+                                  {task.priority === 3 ? 'High' : task.priority === 2 ? 'Medium' : 'Low'}
+                                </span>
+                              </div>
+
+                              <div className="space-y-1 min-w-0">
+                                <h4 className="text-base font-semibold tracking-tight text-white/30 line-through leading-snug break-words">
+                                  {task.title}
+                                </h4>
+                                {task.description && (
+                                  <p className="text-xs text-white/20 line-through leading-relaxed break-words">
+                                    {task.description}
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="flex items-center gap-1.5 bg-white/[0.02] border border-white/[0.05] px-2.5 py-1.5 rounded-lg text-xs text-white/50">
+                                  {getCategoryIcon(task.category)}
+                                  <span>{task.category}</span>
+                                </span>
+                                {task.completedDate && (
+                                  <span className="flex items-center gap-1.5 text-emerald-400 bg-emerald-500/5 px-2.5 py-1.5 rounded-lg border border-emerald-500/10 font-mono text-xs">
+                                    ✓ Completed: {task.completedDate}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-white/[0.03]">
                                 <button
                                   onClick={() => triggerRevertComplete(task.taskId)}
-                                  className="text-[9px] font-semibold px-2 py-1 bg-white/[0.015] border border-white/[0.05] hover:bg-white/[0.03] text-white/50 hover:text-white rounded-sm cursor-pointer transition-colors"
+                                  className="h-11 flex items-center justify-center gap-1.5 rounded-xl font-bold text-xs bg-[#7C5CFF]/10 hover:bg-[#7C5CFF]/20 text-[#8D72FF] border border-[#7C5CFF]/25 cursor-pointer transition-all"
                                 >
-                                  Restore
+                                  <span>Restore</span>
                                 </button>
                                 <button
                                   onClick={() => triggerDeleteTask(task.taskId)}
-                                  className="p-1 text-white/20 hover:text-red-400 hover:bg-white/[0.03] rounded-sm cursor-pointer transition-colors"
+                                  className="h-11 flex items-center justify-center gap-1.5 rounded-xl font-bold text-xs bg-white/[0.02] border border-white/[0.05] hover:bg-red-500/10 text-white/60 hover:text-red-400 cursor-pointer transition-all"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <Trash2 className="w-4 h-4" />
+                                  <span>Delete</span>
                                 </button>
                               </div>
                             </div>
@@ -1308,47 +1938,16 @@ export default function App() {
                       {/* Avatar Row */}
                       <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
-                          <span className="font-semibold text-white">Avatar</span>
-                          <p className="text-[11px] text-white/40">Click the avatar to upload or change photo (JPG, PNG, WEBP, max 5MB).</p>
+                          <span className="font-semibold text-white">Avatar Representation</span>
+                          <p className="text-[11px] text-white/40">Derived automatically from your name.</p>
                         </div>
                         <div className="flex items-center gap-4 shrink-0">
-                          <input 
-                            type="file" 
-                            ref={fileInputRef} 
-                            onChange={handleAvatarUpload} 
-                            accept="image/jpeg,image/png,image/webp" 
-                            className="hidden" 
-                          />
                           <div 
-                            onClick={() => fileInputRef.current?.click()}
-                            className="w-[72px] h-[72px] rounded-full overflow-hidden shrink-0 border border-white/10 relative group cursor-pointer"
+                            className="w-[72px] h-[72px] rounded-full overflow-hidden shrink-0 border border-white/10 relative"
                           >
-                            {userProfileData?.photoURL ? (
-                              <img 
-                                src={userProfileData.photoURL} 
-                                alt="Profile" 
-                                className="w-full h-full object-cover rounded-full"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <div className="w-full h-full bg-gradient-to-br from-[#7C5CFF] to-indigo-600 flex items-center justify-center text-xl font-bold text-white uppercase select-none">
-                                {getInitials(userProfileData?.name || userProfileData?.displayName || 'User')}
-                              </div>
-                            )}
-
-                            {/* Hover overlay */}
-                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-all duration-200 select-none text-white text-[9px] font-semibold text-center">
-                              <Camera className="w-4 h-4 mb-0.5 text-white" />
-                              <span>Change Photo</span>
+                            <div className="w-full h-full bg-gradient-to-br from-[#7C5CFF] to-indigo-600 flex items-center justify-center text-xl font-bold text-white uppercase select-none">
+                              {getInitials(userProfileData?.name || userProfileData?.displayName || 'User')}
                             </div>
-
-                            {/* Upload Progress Overlay */}
-                            {uploadProgress !== null && (
-                              <div className="absolute inset-0 bg-black/75 flex flex-col items-center justify-center text-white text-[10px] font-semibold">
-                                <div className="w-5 h-5 border-2 border-[#7C5CFF] border-t-transparent rounded-full animate-spin mb-1" />
-                                <span>{Math.round(uploadProgress)}%</span>
-                              </div>
-                            )}
                           </div>
                         </div>
                       </div>
@@ -1363,8 +1962,23 @@ export default function App() {
                           type="text"
                           value={userProfileData?.name || ''}
                           onChange={e => setUserProfileData(prev => prev ? { ...prev, name: e.target.value } : null)}
-                          className="w-full sm:w-72 bg-white/[0.015] border border-white/[0.05] rounded-sm px-2.5 h-8 text-xs text-white placeholder-white/20 focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all"
+                          className="w-full sm:w-72 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 h-12 sm:h-8 text-sm sm:text-xs text-white placeholder-white/20 focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all"
                           placeholder="Mahammad Nihal"
+                        />
+                      </div>
+
+                      {/* Email Row */}
+                      <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <span className="font-semibold text-white">Email Address</span>
+                          <p className="text-[11px] text-white/40">Associated with your authenticated session.</p>
+                        </div>
+                        <input
+                          type="email"
+                          value={userProfileData?.email || ''}
+                          onChange={e => setUserProfileData(prev => prev ? { ...prev, email: e.target.value } : null)}
+                          className="w-full sm:w-72 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 h-12 sm:h-8 text-sm sm:text-xs text-white placeholder-white/20 focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all"
+                          placeholder="user@example.com"
                         />
                       </div>
 
@@ -1372,56 +1986,44 @@ export default function App() {
                       <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <span className="font-semibold text-white">Date of Birth</span>
-                          <p className="text-[11px] text-white/40">Your birthdate.</p>
+                          <p className="text-[11px] text-white/40">Your birthdate (Read-only).</p>
                         </div>
-                        <input
-                          type="date"
-                          value={userProfileData?.dob || ''}
-                          onChange={e => setUserProfileData(prev => prev ? { ...prev, dob: e.target.value } : null)}
-                          className="w-full sm:w-72 bg-white/[0.015] border border-white/[0.05] rounded-sm px-2.5 h-8 text-xs text-white focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all font-mono"
-                        />
+                        <span className="text-sm sm:text-xs text-white/60 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 py-2 font-mono sm:w-72 block text-left">
+                          {userProfileData?.dob || 'Not specified'}
+                        </span>
                       </div>
 
                       {/* Gender Row */}
                       <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <span className="font-semibold text-white">Gender</span>
-                          <p className="text-[11px] text-white/40">Your gender identity preference.</p>
+                          <p className="text-[11px] text-white/40">Your gender identity preference (Read-only).</p>
                         </div>
-                        <select
-                          value={userProfileData?.gender || 'Unspecified'}
-                          onChange={e => setUserProfileData(prev => prev ? { ...prev, gender: e.target.value } : null)}
-                          className="w-full sm:w-72 bg-white/[0.015] border border-white/[0.05] rounded-sm px-2.5 h-8 text-xs text-white focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all cursor-pointer"
-                        >
-                          <option value="Unspecified" className="bg-[#0D0D0E]">Prefer not to say</option>
-                          <option value="Male" className="bg-[#0D0D0E]">Male</option>
-                          <option value="Female" className="bg-[#0D0D0E]">Female</option>
-                          <option value="Non-Binary" className="bg-[#0D0D0E]">Non-Binary</option>
-                        </select>
+                        <span className="text-sm sm:text-xs text-white/60 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 py-2 sm:w-72 block text-left">
+                          {userProfileData?.gender || 'Unspecified'}
+                        </span>
                       </div>
 
                       {/* Country Row */}
                       <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <span className="font-semibold text-white">Country</span>
-                          <p className="text-[11px] text-white/40">Localization region.</p>
+                          <p className="text-[11px] text-white/40">Localization region (Read-only).</p>
                         </div>
-                        <SearchableCountrySelector
-                          value={userProfileData?.country || ''}
-                          onChange={countryName => setUserProfileData(prev => prev ? { ...prev, country: countryName } : null)}
-                        />
+                        <span className="text-sm sm:text-xs text-white/60 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 py-2 sm:w-72 block text-left">
+                          {userProfileData?.country || 'India'}
+                        </span>
                       </div>
 
                       {/* Timezone Row */}
                       <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <span className="font-semibold text-white">Timezone</span>
-                          <p className="text-[11px] text-white/40">For due date calculations.</p>
+                          <p className="text-[11px] text-white/40">For due date calculations (Read-only).</p>
                         </div>
-                        <SearchableTimezoneSelector
-                          value={userProfileData?.timezone || 'UTC'}
-                          onChange={tz => setUserProfileData(prev => prev ? { ...prev, timezone: tz } : null)}
-                        />
+                        <span className="text-sm sm:text-xs text-white/60 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 py-2 sm:w-72 block text-left font-mono">
+                          {userProfileData?.timezone || 'UTC'}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1436,12 +2038,13 @@ export default function App() {
                           const updatedProf = {
                             ...currentProf,
                             uid: currentUser.uid,
-                            photoURL: userProfileData.photoURL,
+                            photoURL: '',
                             name: userProfileData.name,
-                            dob: userProfileData.dob,
-                            gender: userProfileData.gender,
-                            country: userProfileData.country,
-                            timezone: userProfileData.timezone,
+                            email: userProfileData.email,
+                            dob: userProfileData.dob || '',
+                            gender: userProfileData.gender || 'Unspecified',
+                            country: userProfileData.country || 'India',
+                            timezone: userProfileData.timezone || 'UTC',
                             updatedAt: new Date().toISOString()
                           };
                           await taskService.current!.saveProfile(currentUser.uid, updatedProf);
@@ -1451,7 +2054,7 @@ export default function App() {
                           addToast('Failed to save profile', 'error');
                         }
                       }}
-                      className="bg-[#7C5CFF] hover:bg-[#8D72FF] text-white text-[11px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors"
+                      className="w-full sm:w-auto h-12 sm:h-8 bg-[#7C5CFF] hover:bg-[#8D72FF] text-white text-sm sm:text-[11px] font-semibold px-5 rounded-xl sm:rounded cursor-pointer transition-colors"
                     >
                       Save Profile
                     </button>
@@ -1486,7 +2089,7 @@ export default function App() {
                         <select
                           value={userProfileData?.theme || 'dark'}
                           onChange={e => setUserProfileData(prev => prev ? { ...prev, theme: e.target.value } : null)}
-                          className="w-full sm:w-72 bg-white/[0.015] border border-white/[0.05] rounded-sm px-2.5 h-8 text-xs text-white focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all cursor-pointer"
+                          className="w-full sm:w-72 bg-[#0D0D0E] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 h-12 sm:h-8 text-sm sm:text-xs text-white focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all cursor-pointer"
                         >
                           <option value="dark" className="bg-[#0D0D0E]">Dark</option>
                           <option value="light" className="bg-[#0D0D0E]">Midnight Minimal Gray</option>
@@ -1516,7 +2119,7 @@ export default function App() {
                         <select
                           value={userProfileData?.firstDayOfWeek || 'Monday'}
                           onChange={e => setUserProfileData(prev => prev ? { ...prev, firstDayOfWeek: e.target.value } : null)}
-                          className="w-full sm:w-72 bg-white/[0.015] border border-white/[0.05] rounded-sm px-2.5 h-8 text-xs text-white focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all cursor-pointer"
+                          className="w-full sm:w-72 bg-[#0D0D0E] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 h-12 sm:h-8 text-sm sm:text-xs text-white focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all cursor-pointer"
                         >
                           <option value="Sunday" className="bg-[#0D0D0E]">Sunday</option>
                           <option value="Monday" className="bg-[#0D0D0E]">Monday</option>
@@ -1579,7 +2182,7 @@ export default function App() {
                       ].map(pref => {
                         const isChecked = !!userProfileData?.notificationPrefs?.[pref.key as keyof typeof userProfileData.notificationPrefs];
                         return (
-                          <label key={pref.key} className="flex items-center gap-2.5 bg-white/[0.015] border border-white/[0.05] hover:bg-white/[0.03] p-3 rounded cursor-pointer transition-all select-none">
+                          <label key={pref.key} className="flex items-center gap-2.5 bg-white/[0.015] border border-white/[0.05] hover:bg-white/[0.03] p-4 sm:p-3 rounded-xl sm:rounded cursor-pointer transition-all select-none">
                             <input
                               type="checkbox"
                               checked={isChecked}
@@ -1597,9 +2200,9 @@ export default function App() {
                                   return { ...prev, notificationPrefs };
                                 });
                               }}
-                              className="w-3.5 h-3.5 accent-[#7C5CFF] rounded cursor-pointer shrink-0"
+                              className="w-4 h-4 accent-[#7C5CFF] rounded cursor-pointer shrink-0"
                             />
-                            <span className="text-xs font-medium text-white/60">{pref.label}</span>
+                            <span className="text-sm sm:text-xs font-medium text-white/60">{pref.label}</span>
                           </label>
                         );
                       })}
@@ -1629,7 +2232,7 @@ export default function App() {
                           addToast('Failed to save settings', 'error');
                         }
                       }}
-                      className="bg-[#7C5CFF] hover:bg-[#8D72FF] text-white text-[11px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors"
+                      className="w-full sm:w-auto h-12 sm:h-8 bg-[#7C5CFF] hover:bg-[#8D72FF] text-white text-sm sm:text-[11px] font-semibold px-5 rounded-xl sm:rounded cursor-pointer transition-colors"
                     >
                       Save Settings
                     </button>
@@ -1739,12 +2342,12 @@ export default function App() {
                         </div>
                         
                         {/* Range Selector Controls */}
-                        <div className="flex items-center gap-1 bg-white/[0.01] border border-white/[0.03] p-0.5 rounded-sm text-[10px] font-semibold text-white/50">
+                        <div className="flex items-center gap-1 bg-white/[0.01] border border-white/[0.03] p-1 sm:p-0.5 rounded-xl sm:rounded-sm text-xs sm:text-[10px] font-semibold text-white/50 w-full sm:w-auto">
                           {(['7', '30', 'custom'] as const).map(mode => (
                             <button
                               key={mode}
                               onClick={() => setGraphRange(mode)}
-                              className={`px-2.5 py-1 rounded-sm cursor-pointer transition-colors ${
+                              className={`h-10 sm:h-auto flex-1 sm:flex-none flex items-center justify-center px-3.5 sm:px-2.5 py-1 rounded-lg sm:rounded-sm cursor-pointer transition-colors ${
                                 graphRange === mode ? 'bg-[#7C5CFF]/15 text-[#7C5CFF] font-bold' : 'hover:text-white'
                               }`}
                             >
@@ -1756,23 +2359,23 @@ export default function App() {
 
                       {/* Custom Date Pickers */}
                       {graphRange === 'custom' && (
-                        <div className="flex flex-wrap items-center gap-2 bg-transparent border border-white/[0.03] p-2 rounded-sm text-[11px] animate-fadeIn">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-white/40">Start:</span>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-transparent border border-white/[0.03] p-3 sm:p-2 rounded-xl sm:rounded-sm text-xs sm:text-[11px] animate-fadeIn">
+                          <div className="flex items-center gap-2 flex-1 w-full">
+                            <span className="text-white/40 shrink-0">Start:</span>
                             <input 
                               type="date"
                               value={customStartDate}
                               onChange={e => setGraphRange(e.target.value)}
-                              className="bg-transparent text-white border border-white/[0.03] px-2 py-1 rounded-sm text-[10px] focus:outline-none focus:border-white/10"
+                              className="bg-[#0D0D0E] text-white border border-white/[0.03] px-3 py-2 rounded-lg sm:rounded-sm text-xs sm:text-[10px] h-11 sm:h-auto focus:outline-none focus:border-white/10 flex-1 w-full"
                             />
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-white/40">End:</span>
+                          <div className="flex items-center gap-2 flex-1 w-full">
+                            <span className="text-white/40 shrink-0">End:</span>
                             <input 
                               type="date"
                               value={customEndDate}
                               onChange={e => setGraphRange(e.target.value)}
-                              className="bg-transparent text-white border border-white/[0.03] px-2 py-1 rounded-sm text-[10px] focus:outline-none focus:border-white/10"
+                              className="bg-[#0D0D0E] text-white border border-white/[0.03] px-3 py-2 rounded-lg sm:rounded-sm text-xs sm:text-[10px] h-11 sm:h-auto focus:outline-none focus:border-white/10 flex-1 w-full"
                             />
                           </div>
                         </div>
@@ -1879,7 +2482,7 @@ export default function App() {
 
 
       {/* TOAST OVERLAY */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+      <div className="fixed bottom-6 right-6 left-6 sm:left-auto z-50 flex flex-col gap-2 max-w-sm pointer-events-none">
         <AnimatePresence>
           {toasts.map(toast => (
             <motion.div
@@ -1887,16 +2490,30 @@ export default function App() {
               initial={{ opacity: 0, y: 15, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9, y: -4 }}
-              className={`p-4 rounded-xl border shadow-lg backdrop-blur-md flex items-center gap-3 pointer-events-auto ${
+              className={`p-4 rounded-xl border shadow-lg backdrop-blur-md flex items-center justify-between gap-3 pointer-events-auto ${
                 toast.type === 'error'
                   ? 'bg-red-500/10 border-red-500/20 text-red-200'
                   : toast.type === 'info'
                     ? 'bg-blue-500/10 border-blue-500/20 text-blue-200'
-                    : 'bg-green-500/10 border-green-500/20 text-green-200'
+                    : 'bg-[#7C5CFF]/10 border-[#7C5CFF]/20 text-[#D8CFFF]'
               }`}
             >
-              <div className="w-2 h-2 rounded-full bg-current animate-pulse" />
-              <span className="text-xs font-semibold font-mono">{toast.message}</span>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-2 h-2 rounded-full bg-current animate-pulse shrink-0" />
+                <span className="text-xs font-semibold font-mono truncate">{toast.message}</span>
+              </div>
+              {toast.showUndo && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleUndo();
+                    setToasts(prev => prev.filter(t => t.id !== toast.id));
+                  }}
+                  className="px-2.5 py-1 text-[10px] font-bold text-[#9D85FF] hover:text-white bg-white/[0.04] hover:bg-[#7C5CFF]/20 rounded-lg border border-[#7C5CFF]/30 cursor-pointer transition-all active:scale-95 shrink-0"
+                >
+                  Undo
+                </button>
+              )}
             </motion.div>
           ))}
         </AnimatePresence>
