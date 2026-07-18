@@ -1976,8 +1976,8 @@ export default function App() {
                         <input
                           type="email"
                           value={userProfileData?.email || ''}
-                          onChange={e => setUserProfileData(prev => prev ? { ...prev, email: e.target.value } : null)}
-                          className="w-full sm:w-72 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 h-12 sm:h-8 text-sm sm:text-xs text-white placeholder-white/20 focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all"
+                          readOnly
+                          className="w-full sm:w-72 bg-white/[0.01] border border-white/[0.03] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 h-12 sm:h-8 text-sm sm:text-xs text-white/40 cursor-not-allowed focus:outline-none transition-all"
                           placeholder="user@example.com"
                         />
                       </div>
@@ -1986,44 +1986,56 @@ export default function App() {
                       <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <span className="font-semibold text-white">Date of Birth</span>
-                          <p className="text-[11px] text-white/40">Your birthdate (Read-only).</p>
+                          <p className="text-[11px] text-white/40">Your birthdate.</p>
                         </div>
-                        <span className="text-sm sm:text-xs text-white/60 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 py-2 font-mono sm:w-72 block text-left">
-                          {userProfileData?.dob || 'Not specified'}
-                        </span>
+                        <input
+                          type="date"
+                          value={userProfileData?.dob || ''}
+                          onChange={e => setUserProfileData(prev => prev ? { ...prev, dob: e.target.value } : null)}
+                          className="w-full sm:w-72 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 h-12 sm:h-8 text-sm sm:text-xs text-white focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all font-mono"
+                        />
                       </div>
 
                       {/* Gender Row */}
                       <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <span className="font-semibold text-white">Gender</span>
-                          <p className="text-[11px] text-white/40">Your gender identity preference (Read-only).</p>
+                          <p className="text-[11px] text-white/40">Your gender identity preference.</p>
                         </div>
-                        <span className="text-sm sm:text-xs text-white/60 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 py-2 sm:w-72 block text-left">
-                          {userProfileData?.gender || 'Unspecified'}
-                        </span>
+                        <select
+                          value={userProfileData?.gender || 'Unspecified'}
+                          onChange={e => setUserProfileData(prev => prev ? { ...prev, gender: e.target.value } : null)}
+                          className="w-full sm:w-72 bg-[#0D0D0E] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 h-12 sm:h-8 text-sm sm:text-xs text-white focus:border-white/20 focus:ring-1 focus:ring-white/20 focus:outline-none transition-all cursor-pointer"
+                        >
+                          <option value="Unspecified" className="bg-[#0D0D0E]">Prefer not to say</option>
+                          <option value="Male" className="bg-[#0D0D0E]">Male</option>
+                          <option value="Female" className="bg-[#0D0D0E]">Female</option>
+                          <option value="Non-Binary" className="bg-[#0D0D0E]">Non-Binary</option>
+                        </select>
                       </div>
 
                       {/* Country Row */}
                       <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <span className="font-semibold text-white">Country</span>
-                          <p className="text-[11px] text-white/40">Localization region (Read-only).</p>
+                          <p className="text-[11px] text-white/40">Localization region.</p>
                         </div>
-                        <span className="text-sm sm:text-xs text-white/60 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 py-2 sm:w-72 block text-left">
-                          {userProfileData?.country || 'India'}
-                        </span>
+                        <SearchableCountrySelector
+                          value={userProfileData?.country || ''}
+                          onChange={countryName => setUserProfileData(prev => prev ? { ...prev, country: countryName } : null)}
+                        />
                       </div>
 
                       {/* Timezone Row */}
                       <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <span className="font-semibold text-white">Timezone</span>
-                          <p className="text-[11px] text-white/40">For due date calculations (Read-only).</p>
+                          <p className="text-[11px] text-white/40">For due date calculations.</p>
                         </div>
-                        <span className="text-sm sm:text-xs text-white/60 bg-white/[0.015] border border-white/[0.05] rounded-xl sm:rounded-sm px-3.5 sm:px-2.5 py-2 sm:w-72 block text-left font-mono">
-                          {userProfileData?.timezone || 'UTC'}
-                        </span>
+                        <SearchableTimezoneSelector
+                          value={userProfileData?.timezone || 'UTC'}
+                          onChange={tz => setUserProfileData(prev => prev ? { ...prev, timezone: tz } : null)}
+                        />
                       </div>
                     </div>
                   </div>
