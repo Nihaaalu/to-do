@@ -1,4 +1,5 @@
 import { 
+  signInWithPopup, 
   signInWithRedirect,
   getRedirectResult,
   GoogleAuthProvider, 
@@ -20,9 +21,9 @@ export class FirebaseAuthService implements IAuthService {
   private redirectPromise: Promise<UserProfile | null> | null = null;
 
   constructor() {
-    // Eagerly check redirect result on application startup
+    // Eagerly check redirect result on startup
     this.handleRedirectResult().catch((err) => {
-      console.warn('[AUTH] Startup redirect result check status:', err?.message || err);
+      console.warn('[AUTH] Startup redirect result check finished with status:', err?.message || err);
     });
   }
 
@@ -88,12 +89,12 @@ export class FirebaseAuthService implements IAuthService {
 
     if (!this.redirectPromise) {
       this.redirectPromise = (async () => {
-        console.log('[AUTH] Checking redirect result');
         try {
           const result = await getRedirectResult(auth);
           this.redirectHandled = true;
           if (result && result.user) {
-            console.log('[AUTH] Google redirect sign-in successful');
+            console.log('[AUTH] Redirect sign-in completed');
+            console.log('[AUTH] Google sign-in successful');
             await this.createOrUpdateUserDoc(result.user, 'google');
             this.currentUser = this.mapFirebaseUserToProfile(result.user);
             return this.currentUser;
@@ -101,9 +102,7 @@ export class FirebaseAuthService implements IAuthService {
           return null;
         } catch (error: any) {
           this.redirectHandled = true;
-          console.error('[AUTH] Google redirect sign-in failed');
-          console.error('[AUTH] Error code:', error?.code || 'unknown');
-          console.error('[AUTH] Error message:', error?.message || String(error));
+          console.error('[AUTH] Redirect sign-in error:', error);
           throw error;
         }
       })();
@@ -112,19 +111,42 @@ export class FirebaseAuthService implements IAuthService {
     return this.redirectPromise;
   }
 
-  public async signInWithGoogle(): Promise<void> {
-    console.log('[AUTH] Starting Google redirect sign-in');
+  public async signInWithGoogle(): Promise<UserProfile | null> {
+    console.log('[AUTH] Google popup sign-in started');
     const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
 
     try {
-      console.log('[AUTH] Google redirect initiated');
-      await signInWithRedirect(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      console.log('[AUTH] Google sign-in successful');
+      await this.createOrUpdateUserDoc(result.user, 'google');
+      this.currentUser = this.mapFirebaseUserToProfile(result.user);
+      return this.currentUser;
     } catch (error: any) {
-      console.error('[AUTH] Google redirect sign-in failed');
-      console.error('[AUTH] Error code:', error?.code || 'unknown');
-      console.error('[AUTH] Error message:', error?.message || String(error));
-      throw error;
+      const errorCode = error?.code || '';
+
+      if (errorCode === 'auth/popup-blocked') {
+        console.warn('[AUTH] Popup blocked, falling back to redirect');
+        try {
+          await signInWithRedirect(auth, provider);
+          // Redirect initiated successfully; browser will navigate away
+          return null;
+        } catch (redirectError: any) {
+          console.error('[AUTH] Redirect sign-in initiation failed:', redirectError);
+          // Both popup and redirect failed
+          const combinedError = new Error('Google sign-in popup was blocked and redirect failed. Please check your browser popup and redirect permissions.');
+          (combinedError as any).code = 'auth/popup-and-redirect-failed';
+          throw combinedError;
+        }
+      } else if (
+        errorCode === 'auth/popup-closed-by-user' ||
+        errorCode === 'auth/cancelled-popup-request'
+      ) {
+        console.log(`[AUTH] Google sign-in cancelled: ${errorCode}`);
+        return null;
+      } else {
+        console.error('[AUTH] Google popup sign-in error:', error);
+        throw error;
+      }
     }
   }
 
