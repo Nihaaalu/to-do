@@ -1,5 +1,7 @@
 import { 
   signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider, 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -15,6 +17,15 @@ import { IAuthService, UserProfile } from './interfaces';
 
 export class FirebaseAuthService implements IAuthService {
   private currentUser: UserProfile | null = null;
+  private redirectHandled = false;
+  private redirectPromise: Promise<UserProfile | null> | null = null;
+
+  constructor() {
+    // Eagerly check redirect result on startup
+    this.handleRedirectResult().catch((err) => {
+      console.warn('[AUTH] Startup redirect result check finished with status:', err?.message || err);
+    });
+  }
 
   private mapFirebaseUserToProfile(user: User): UserProfile {
     // Determine provider
@@ -32,47 +43,111 @@ export class FirebaseAuthService implements IAuthService {
   }
 
   private async createOrUpdateUserDoc(user: User, provider: 'google' | 'password', fullName?: string) {
-    const userRef = doc(db, 'users', user.uid);
-    const userSnap = await getDoc(userRef);
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      const userSnap = await getDoc(userRef);
 
-    const name = fullName || user.displayName || user.email?.split('@')[0] || 'User';
+      const name = fullName || user.displayName || user.email?.split('@')[0] || 'User';
 
-    if (!userSnap.exists()) {
-      // First-time login: create the document
-      await setDoc(userRef, {
-        uid: user.uid,
-        fullName: name,
-        email: user.email,
-        provider,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        // Also save initial profile settings default
-        dob: '',
-        gender: 'Unspecified',
-        country: 'India',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-        theme: 'dark',
-        notificationPrefs: {
-          minutesBefore30: true,
-          minutesBefore15: true,
-          minutesBefore5: true,
-          atDeadline: true
-        }
-      });
-    } else {
-      // Subsequent logins: update updatedAt
-      await updateDoc(userRef, {
-        updatedAt: serverTimestamp()
-      });
+      if (!userSnap.exists()) {
+        // First-time login: create the document
+        await setDoc(userRef, {
+          uid: user.uid,
+          fullName: name,
+          email: user.email,
+          provider,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          // Also save initial profile settings default
+          dob: '',
+          gender: 'Unspecified',
+          country: 'India',
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          theme: 'dark',
+          notificationPrefs: {
+            minutesBefore30: true,
+            minutesBefore15: true,
+            minutesBefore5: true,
+            atDeadline: true
+          }
+        });
+      } else {
+        // Subsequent logins: update updatedAt
+        await updateDoc(userRef, {
+          updatedAt: serverTimestamp()
+        });
+      }
+    } catch (err) {
+      console.warn('[AUTH] Note: Failed to update user doc in Firestore (non-fatal):', err);
     }
   }
 
-  public async signInWithGoogle(): Promise<UserProfile> {
+  public async handleRedirectResult(): Promise<UserProfile | null> {
+    if (this.redirectHandled) {
+      return this.currentUser;
+    }
+
+    if (!this.redirectPromise) {
+      this.redirectPromise = (async () => {
+        try {
+          const result = await getRedirectResult(auth);
+          this.redirectHandled = true;
+          if (result && result.user) {
+            console.log('[AUTH] Redirect sign-in completed');
+            console.log('[AUTH] Google sign-in successful');
+            await this.createOrUpdateUserDoc(result.user, 'google');
+            this.currentUser = this.mapFirebaseUserToProfile(result.user);
+            return this.currentUser;
+          }
+          return null;
+        } catch (error: any) {
+          this.redirectHandled = true;
+          console.error('[AUTH] Redirect sign-in error:', error);
+          throw error;
+        }
+      })();
+    }
+
+    return this.redirectPromise;
+  }
+
+  public async signInWithGoogle(): Promise<UserProfile | null> {
+    console.log('[AUTH] Google popup sign-in started');
     const provider = new GoogleAuthProvider();
-    const result = await signInWithPopup(auth, provider);
-    await this.createOrUpdateUserDoc(result.user, 'google');
-    this.currentUser = this.mapFirebaseUserToProfile(result.user);
-    return this.currentUser;
+
+    try {
+      const result = await signInWithPopup(auth, provider);
+      console.log('[AUTH] Google sign-in successful');
+      await this.createOrUpdateUserDoc(result.user, 'google');
+      this.currentUser = this.mapFirebaseUserToProfile(result.user);
+      return this.currentUser;
+    } catch (error: any) {
+      const errorCode = error?.code || '';
+
+      if (errorCode === 'auth/popup-blocked') {
+        console.warn('[AUTH] Popup blocked, falling back to redirect');
+        try {
+          await signInWithRedirect(auth, provider);
+          // Redirect initiated successfully; browser will navigate away
+          return null;
+        } catch (redirectError: any) {
+          console.error('[AUTH] Redirect sign-in initiation failed:', redirectError);
+          // Both popup and redirect failed
+          const combinedError = new Error('Google sign-in popup was blocked and redirect failed. Please check your browser popup and redirect permissions.');
+          (combinedError as any).code = 'auth/popup-and-redirect-failed';
+          throw combinedError;
+        }
+      } else if (
+        errorCode === 'auth/popup-closed-by-user' ||
+        errorCode === 'auth/cancelled-popup-request'
+      ) {
+        console.log(`[AUTH] Google sign-in cancelled: ${errorCode}`);
+        return null;
+      } else {
+        console.error('[AUTH] Google popup sign-in error:', error);
+        throw error;
+      }
+    }
   }
 
   public async signUpWithEmail(email: string, password: string, fullName: string): Promise<UserProfile> {

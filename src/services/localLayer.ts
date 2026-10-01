@@ -44,6 +44,10 @@ export class LocalAuthService implements IAuthService {
     return this.currentUser || { ...DEFAULT_PROFILE };
   }
 
+  public async handleRedirectResult(): Promise<UserProfile | null> {
+    return null;
+  }
+
   public async signUpWithEmail(email: string, password: string, fullName: string): Promise<UserProfile> {
     const user = { ...DEFAULT_PROFILE, email, displayName: fullName, name: fullName };
     this.currentUser = user;

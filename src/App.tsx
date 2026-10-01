@@ -214,6 +214,7 @@ export default function App() {
 
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const activeLoadedUid = useRef<string | null>(null);
 
   // UI Local States
   const [swingTab, setSwingTab] = useState<'home' | 'completed' | 'insights' | 'profile' | 'settings'>('home');
@@ -319,13 +320,31 @@ export default function App() {
       setTasks(updatedTasks);
     });
 
+    // Startup check: Process redirect result if returning from a Google redirect
+    if (authService.current?.handleRedirectResult) {
+      authService.current.handleRedirectResult()
+        .then((user) => {
+          if (user) {
+            addTerminalLog(`[AUTH] Welcome back, ${user.displayName || user.email}`);
+          }
+        })
+        .catch((err) => {
+          console.error('[AUTH] Startup redirect sign-in error:', err);
+          addToast('Google redirect sign-in failed. Please try again.', 'error');
+        });
+    }
+
     const unsubscribe = authService.current!.onAuthStateChanged((user) => {
       setCurrentUser(user);
       setIsAuthChecking(false);
       if (user) {
-        addTerminalLog('[SYSTEM] Secure cloud workspace active.');
-        loadUserData(user.uid);
+        if (activeLoadedUid.current !== user.uid) {
+          activeLoadedUid.current = user.uid;
+          addTerminalLog('[SYSTEM] Secure cloud workspace active.');
+          loadUserData(user.uid);
+        }
       } else {
+        activeLoadedUid.current = null;
         addTerminalLog('[SYSTEM] Secure workspace signed out.');
       }
     });
@@ -381,6 +400,7 @@ export default function App() {
     try {
       addTerminalLog('[SYSTEM] Logging out of secure session...');
       await authService.current!.signOut();
+      activeLoadedUid.current = null;
       setCurrentUser(null);
       setTasks([]);
       setUserProfileData(null);

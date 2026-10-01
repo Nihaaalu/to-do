@@ -17,7 +17,7 @@ export function AuthScreen({ authService, onAuthSuccess }: AuthScreenProps) {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const getFriendlyErrorMessage = (errCode: string): string => {
+  const getFriendlyErrorMessage = (errCode: string, errMessage?: string): string => {
     switch (errCode) {
       case 'auth/user-not-found':
       case 'auth/wrong-password':
@@ -33,7 +33,14 @@ export function AuthScreen({ authService, onAuthSuccess }: AuthScreenProps) {
         return 'Network error. Please check your internet connection.';
       case 'auth/too-many-requests':
         return 'Too many failed login attempts. Please try again later.';
+      case 'auth/popup-and-redirect-failed':
+        return 'Google sign-in popup was blocked and redirect failed. Please check your browser popup and redirect settings.';
+      case 'auth/unauthorized-domain':
+        return 'This domain is not authorized for Google Sign-In in Firebase. Please add this domain to Authorized Domains in Firebase Authentication Settings.';
       default:
+        if (errMessage && (errMessage.includes('blocked') || errMessage.includes('redirect'))) {
+          return errMessage;
+        }
         return 'An unexpected authentication error occurred. Please try again.';
     }
   };
@@ -44,10 +51,12 @@ export function AuthScreen({ authService, onAuthSuccess }: AuthScreenProps) {
     setSuccessMessage(null);
     try {
       const user = await authService.signInWithGoogle();
-      onAuthSuccess(user);
+      if (user) {
+        onAuthSuccess(user);
+      }
     } catch (err: any) {
       console.error(err);
-      setError(getFriendlyErrorMessage(err?.code));
+      setError(getFriendlyErrorMessage(err?.code, err?.message));
     } finally {
       setLoading(false);
     }
