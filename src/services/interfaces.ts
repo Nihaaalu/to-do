@@ -32,7 +32,7 @@ export interface UserSettings {
 }
 
 export interface IAuthService {
-  signInWithGoogle(): Promise<UserProfile | null>;
+  signInWithGoogle(): Promise<UserProfile | null | void>;
   handleRedirectResult?(): Promise<UserProfile | null>;
   signUpWithEmail(email: string, password: string, fullName: string): Promise<UserProfile>;
   signInWithEmail(email: string, password: string): Promise<UserProfile>;
