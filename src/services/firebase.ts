@@ -6,7 +6,7 @@ const firebaseConfig = {
   projectId: "smart-to-do-ca979",
   appId: "1:54005926303:web:26bbd4a0b512549b2a15aa",
   apiKey: "AIzaSyDqE7R4fpNdxd-27mcxiONSwfcr5wIK48M",
-  authDomain: "smart-to-do-ca979.firebaseapp.com",
+  authDomain: "to-do-lpu.vercel.app",
   storageBucket: "smart-to-do-ca979.firebasestorage.app",
   messagingSenderId: "54005926303"
 };

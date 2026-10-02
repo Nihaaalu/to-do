@@ -319,23 +319,48 @@ export default function App() {
       setTasks(updatedTasks);
     });
 
-    // Startup check: Process redirect result if returning from a Google redirect
-    if (authService.current?.handleRedirectResult) {
-      authService.current.handleRedirectResult()
-        .then((user) => {
-          if (user) {
-            addTerminalLog(`[AUTH] Welcome back, ${user.displayName || user.email}`);
+    let isMounted = true;
+    let initialAuthFired = false;
+    let redirectCheckCompleted = false;
+
+    const checkAndFinishLoading = () => {
+      if (!isMounted) return;
+      if (redirectCheckCompleted && initialAuthFired) {
+        setIsAuthChecking(false);
+      }
+    };
+
+    // Startup check: Process redirect result deterministically
+    const runAuthInit = async () => {
+      try {
+        console.log('[AUTH] Checking redirect result at startup...');
+        if (authService.current?.handleRedirectResult) {
+          const redirectUser = await authService.current.handleRedirectResult();
+          if (redirectUser && isMounted) {
+            console.log('[AUTH] User successfully restored from redirect:', redirectUser.uid);
+            setCurrentUser(redirectUser);
+            addTerminalLog(`[AUTH] Welcome back, ${redirectUser.displayName || redirectUser.email}`);
+          } else {
+            console.log('[AUTH] No redirect user returned from getRedirectResult.');
           }
-        })
-        .catch((err) => {
-          console.error('[AUTH] Startup redirect sign-in error:', err);
-          addToast('Google redirect sign-in failed. Please try again.', 'error');
-        });
-    }
+        }
+      } catch (err: any) {
+        console.error('[AUTH] Startup redirect result error:', err?.code || err?.name, err?.message || err);
+        addToast(err?.message || 'Google redirect sign-in encountered an error.', 'error');
+      } finally {
+        redirectCheckCompleted = true;
+        checkAndFinishLoading();
+      }
+    };
+
+    runAuthInit();
 
     const unsubscribe = authService.current!.onAuthStateChanged((user) => {
+      if (!isMounted) return;
+      console.log('[AUTH] Auth state synchronized in App.tsx. User:', user ? user.uid : 'none');
+      initialAuthFired = true;
       setCurrentUser(user);
-      setIsAuthChecking(false);
+
       if (user) {
         if (activeLoadedUid.current !== user.uid) {
           activeLoadedUid.current = user.uid;
@@ -346,9 +371,14 @@ export default function App() {
         activeLoadedUid.current = null;
         addTerminalLog('[SYSTEM] Secure workspace signed out.');
       }
+
+      checkAndFinishLoading();
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   const [tick, setTick] = useState(0);

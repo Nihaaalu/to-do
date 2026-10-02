@@ -20,10 +20,8 @@ export class FirebaseAuthService implements IAuthService {
   private redirectPromise: Promise<UserProfile | null> | null = null;
 
   constructor() {
-    // Eagerly check redirect result on startup
-    this.handleRedirectResult().catch((err) => {
-      console.warn('[AUTH] Startup redirect result check finished with status:', err?.message || err);
-    });
+    // Constructor initializes cleanly without firing background side-effects.
+    // Redirect result is handled deterministically by the application startup coordinator.
   }
 
   private mapFirebaseUserToProfile(user: User): UserProfile {
@@ -38,7 +36,7 @@ export class FirebaseAuthService implements IAuthService {
       photoURL: user.photoURL || '',
       name: user.displayName || user.email?.split('@')[0] || 'User',
       provider
-    } as any; // Cast as any to allow custom fields
+    } as any;
   }
 
   private async createOrUpdateUserDoc(user: User, provider: 'google' | 'password', fullName?: string) {
@@ -49,7 +47,6 @@ export class FirebaseAuthService implements IAuthService {
       const name = fullName || user.displayName || user.email?.split('@')[0] || 'User';
 
       if (!userSnap.exists()) {
-        // First-time login: create the document
         await setDoc(userRef, {
           uid: user.uid,
           fullName: name,
@@ -57,7 +54,6 @@ export class FirebaseAuthService implements IAuthService {
           provider,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-          // Also save initial profile settings default
           dob: '',
           gender: 'Unspecified',
           country: 'India',
@@ -71,7 +67,6 @@ export class FirebaseAuthService implements IAuthService {
           }
         });
       } else {
-        // Subsequent logins: update updatedAt
         await updateDoc(userRef, {
           updatedAt: serverTimestamp()
         });
@@ -89,19 +84,23 @@ export class FirebaseAuthService implements IAuthService {
     if (!this.redirectPromise) {
       this.redirectPromise = (async () => {
         try {
+          console.log('[AUTH] Checking getRedirectResult(auth)...');
           const result = await getRedirectResult(auth);
           this.redirectHandled = true;
+
           if (result && result.user) {
-            console.log('[AUTH] Redirect sign-in completed');
-            console.log('[AUTH] Google sign-in successful');
+            console.log('[AUTH] getRedirectResult returned user UID:', result.user.uid);
+            console.log('[AUTH] Google redirect authentication successful');
             await this.createOrUpdateUserDoc(result.user, 'google');
             this.currentUser = this.mapFirebaseUserToProfile(result.user);
             return this.currentUser;
           }
+
+          console.log('[AUTH] getRedirectResult returned null (no redirect in progress)');
           return null;
         } catch (error: any) {
           this.redirectHandled = true;
-          console.error('[AUTH] Redirect sign-in error:', error);
+          console.error('[AUTH] getRedirectResult error:', error.code || 'UNKNOWN', error.message || error);
           throw error;
         }
       })();
@@ -111,7 +110,7 @@ export class FirebaseAuthService implements IAuthService {
   }
 
   public async signInWithGoogle(): Promise<UserProfile | null> {
-    console.log('[AUTH] Google redirect sign-in started');
+    console.log('[AUTH] Starting Google signInWithRedirect...');
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
@@ -119,20 +118,15 @@ export class FirebaseAuthService implements IAuthService {
       await signInWithRedirect(auth, provider);
       return null;
     } catch (error: any) {
-      console.error('[AUTH] Google redirect sign-in error:', error);
+      console.error('[AUTH] Google signInWithRedirect error:', error.code || 'UNKNOWN', error.message || error);
       throw error;
     }
   }
 
   public async signUpWithEmail(email: string, password: string, fullName: string): Promise<UserProfile> {
     const result = await createUserWithEmailAndPassword(auth, email, password);
-    
-    // Update auth display name
     await updateProfile(result.user, { displayName: fullName });
-    
-    // Create Firestore document
     await this.createOrUpdateUserDoc(result.user, 'password', fullName);
-    
     this.currentUser = this.mapFirebaseUserToProfile(result.user);
     return this.currentUser;
   }
@@ -154,6 +148,7 @@ export class FirebaseAuthService implements IAuthService {
 
   public onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void {
     return firebaseOnAuthStateChanged(auth, async (user) => {
+      console.log('[AUTH] onAuthStateChanged fired. User:', user ? `UID: ${user.uid}` : 'null');
       if (user) {
         this.currentUser = this.mapFirebaseUserToProfile(user);
         callback(this.currentUser);
