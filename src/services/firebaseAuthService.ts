@@ -17,7 +17,14 @@ import { IAuthService, UserProfile } from './interfaces';
 export class FirebaseAuthService implements IAuthService {
   private currentUser: UserProfile | null = null;
   private redirectHandled = false;
-  private initPromise: Promise<UserProfile | null> | null = null;
+  private redirectPromise: Promise<UserProfile | null> | null = null;
+
+  constructor() {
+    // Eagerly check redirect result on startup
+    this.handleRedirectResult().catch((err) => {
+      console.warn('[AUTH] Startup redirect result check finished with status:', err?.message || err);
+    });
+  }
 
   private mapFirebaseUserToProfile(user: User): UserProfile {
     // Determine provider
@@ -74,76 +81,45 @@ export class FirebaseAuthService implements IAuthService {
     }
   }
 
-  public async initAuth(): Promise<UserProfile | null> {
-    if (this.initPromise) {
-      return this.initPromise;
+  public async handleRedirectResult(): Promise<UserProfile | null> {
+    if (this.redirectHandled) {
+      return this.currentUser;
     }
 
-    this.initPromise = (async () => {
-      console.log('[AUTH] Checking redirect result');
-      let redirectUser: User | null = null;
-      try {
-        const result = await getRedirectResult(auth);
-        console.log('[AUTH] Redirect result received');
-        if (result && result.user) {
-          redirectUser = result.user;
-          console.log(`[AUTH] Redirect user: ${result.user.uid}`);
-          console.log('[AUTH] Google redirect sign-in successful');
-          await this.createOrUpdateUserDoc(result.user, 'google');
-          this.currentUser = this.mapFirebaseUserToProfile(result.user);
-        } else {
-          console.log('[AUTH] Redirect user: null');
+    if (!this.redirectPromise) {
+      this.redirectPromise = (async () => {
+        try {
+          const result = await getRedirectResult(auth);
+          this.redirectHandled = true;
+          if (result && result.user) {
+            console.log('[AUTH] Redirect sign-in completed');
+            console.log('[AUTH] Google sign-in successful');
+            await this.createOrUpdateUserDoc(result.user, 'google');
+            this.currentUser = this.mapFirebaseUserToProfile(result.user);
+            return this.currentUser;
+          }
+          return null;
+        } catch (error: any) {
+          this.redirectHandled = true;
+          console.error('[AUTH] Redirect sign-in error:', error);
+          throw error;
         }
-      } catch (error: any) {
-        console.log('[AUTH] Redirect result received');
-        console.log('[AUTH] Redirect user: null');
-        console.error('[AUTH] Google redirect sign-in failed');
-        console.error('[AUTH] Error code:', error?.code || 'unknown');
-        console.error('[AUTH] Error message:', error?.message || String(error));
-      }
+      })();
+    }
 
-      // Wait for Firebase Auth's initial state resolution
-      await new Promise<void>((resolve) => {
-        let hasResolved = false;
-        const unsubscribe = firebaseOnAuthStateChanged(auth, async (user) => {
-          console.log(`[AUTH] Auth state changed: ${user ? user.uid : 'null'}`);
-          if (user) {
-            this.currentUser = this.mapFirebaseUserToProfile(user);
-          } else if (!redirectUser) {
-            this.currentUser = null;
-          }
-          if (!hasResolved) {
-            hasResolved = true;
-            unsubscribe();
-            resolve();
-          }
-        });
-      });
-
-      console.log('[AUTH] Auth initialization complete');
-      this.redirectHandled = true;
-      return this.currentUser;
-    })();
-
-    return this.initPromise;
+    return this.redirectPromise;
   }
 
-  public async handleRedirectResult(): Promise<UserProfile | null> {
-    return this.initAuth();
-  }
-
-  public async signInWithGoogle(): Promise<void> {
-    console.log('[AUTH] Starting Google redirect sign-in');
+  public async signInWithGoogle(): Promise<UserProfile | null> {
+    console.log('[AUTH] Google redirect sign-in started');
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
     try {
-      console.log('[AUTH] Google redirect initiated');
       await signInWithRedirect(auth, provider);
+      return null;
     } catch (error: any) {
-      console.error('[AUTH] Google redirect sign-in failed');
-      console.error('[AUTH] Error code:', error?.code || 'unknown');
-      console.error('[AUTH] Error message:', error?.message || String(error));
+      console.error('[AUTH] Google redirect sign-in error:', error);
       throw error;
     }
   }
