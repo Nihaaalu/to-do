@@ -43,7 +43,6 @@ import {
 } from 'recharts';
 
 import { Task, UndoAction } from './types';
-import { LocalAuthService, LocalStorageService } from './services/localLayer';
 import { FirebaseAuthService } from './services/firebaseAuthService';
 import { FirebaseStorageService } from './services/firebaseStorageService';
 import { TaskService } from './services/serviceLayer';
@@ -364,6 +363,7 @@ export default function App() {
     try {
       setIsLoaded(false);
       await taskService.current!.loadAll(uid);
+      taskService.current!.startRealtimeSync(uid);
       const prof = await taskService.current!.loadProfile(uid);
       if (prof) {
         setUserProfileData(prof);
@@ -391,7 +391,7 @@ export default function App() {
       }
       setIsLoaded(true);
     } catch (error) {
-      addTerminalLog('[ERROR] Failed to load local data.');
+      addTerminalLog('[ERROR] Failed to load data from Cloud Firestore.');
       addToast('Data load failed', 'error');
     }
   };
@@ -399,6 +399,7 @@ export default function App() {
   const handleLogout = async () => {
     try {
       addTerminalLog('[SYSTEM] Logging out of secure session...');
+      taskService.current!.stopRealtimeSync();
       await authService.current!.signOut();
       activeLoadedUid.current = null;
       setCurrentUser(null);
@@ -984,6 +985,15 @@ export default function App() {
           addTerminalLog(`[SYSTEM] Welcome back, ${user.displayName || user.email}`);
         }} 
       />
+    );
+  }
+
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen w-full bg-[#000000] text-white flex flex-col justify-center items-center select-none">
+        <div className="w-10 h-10 border-2 border-[#7C5CFF]/30 border-t-[#7C5CFF] rounded-full animate-spin mb-4" />
+        <span className="text-[10px] font-mono text-white/40 tracking-widest uppercase">SYNCHRONIZING CLOUD FIRESTORE WORKSPACE...</span>
+      </div>
     );
   }
 

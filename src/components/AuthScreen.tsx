@@ -30,15 +30,19 @@ export function AuthScreen({ authService, onAuthSuccess }: AuthScreenProps) {
       case 'auth/invalid-email':
         return 'Please enter a valid email address.';
       case 'auth/network-request-failed':
-        return 'Network error. Please check your internet connection.';
+        return 'Network connection issue. Please check your internet connection.';
       case 'auth/too-many-requests':
-        return 'Too many failed login attempts. Please try again later.';
-      case 'auth/popup-and-redirect-failed':
-        return 'Google sign-in popup was blocked and redirect failed. Please check your browser popup and redirect settings.';
+        return 'Too many failed attempts. Please try again later.';
+      case 'auth/redirect-cancelled-by-user':
+        return 'Google sign-in was cancelled.';
+      case 'auth/popup-blocked':
+        return 'Popups are blocked by your browser. Google Sign-In uses full-page redirect.';
+      case 'auth/internal-error':
+        return 'An internal authentication error occurred. Please try again.';
       case 'auth/unauthorized-domain':
         return 'This domain is not authorized for Google Sign-In in Firebase. Please add this domain to Authorized Domains in Firebase Authentication Settings.';
       default:
-        if (errMessage && (errMessage.includes('blocked') || errMessage.includes('redirect'))) {
+        if (errMessage) {
           return errMessage;
         }
         return 'An unexpected authentication error occurred. Please try again.';
@@ -50,14 +54,16 @@ export function AuthScreen({ authService, onAuthSuccess }: AuthScreenProps) {
     setError(null);
     setSuccessMessage(null);
     try {
-      const user = await authService.signInWithGoogle();
+      await authService.signInWithGoogle();
+      const user = authService.getCurrentUser();
       if (user) {
         onAuthSuccess(user);
       }
     } catch (err: any) {
       console.error(err);
-      setError(getFriendlyErrorMessage(err?.code, err?.message));
-    } finally {
+      if (err?.code !== 'auth/redirect-cancelled-by-user') {
+        setError(getFriendlyErrorMessage(err?.code, err?.message));
+      }
       setLoading(false);
     }
   };

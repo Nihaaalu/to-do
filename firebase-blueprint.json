@@ -1,0 +1,71 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information and preferences",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "fullName": { "type": "string", "description": "User full name" },
+        "dob": { "type": "string", "description": "Date of birth" },
+        "gender": { "type": "string", "description": "Gender" },
+        "country": { "type": "string", "description": "Country of residence" },
+        "timezone": { "type": "string", "description": "Timezone" },
+        "theme": { "type": "string", "description": "UI Theme" }
+      },
+      "required": ["uid"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Task item with priority, deadlines, and status",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "number", "description": "Unique numeric task identifier" },
+        "title": { "type": "string", "description": "Task title" },
+        "description": { "type": "string", "description": "Task detailed description" },
+        "category": { "type": "string", "description": "Task category" },
+        "priority": { "type": "number", "description": "Priority level 1, 2, or 3" },
+        "dueDate": { "type": "string", "description": "Due date formatted as DD/MM/YYYY or YYYY-MM-DD" },
+        "dueTime": { "type": "string", "description": "Due time string" },
+        "dueTimestamp": { "type": "number", "description": "Due date timestamp" },
+        "status": { "type": "string", "description": "Task status (Pending or Completed)" },
+        "createdDate": { "type": "string", "description": "Date created" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in milliseconds" },
+        "completedDate": { "type": "string", "description": "Date completed" },
+        "completedAt": { "type": "number", "description": "Completion timestamp in milliseconds" }
+      },
+      "required": ["taskId", "title", "priority", "status"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User specific app configuration and settings",
+      "type": "object",
+      "properties": {
+        "theme": { "type": "string", "description": "Theme setting" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Root user profile document"
+    },
+    "/users/{userId}/profile/{profileId}": {
+      "schema": "UserProfile",
+      "description": "Profile information subcollection"
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Active tasks subcollection for user"
+    },
+    "/users/{userId}/completedTasks/{taskId}": {
+      "schema": "Task",
+      "description": "Completed tasks subcollection for user"
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": "UserSettings",
+      "description": "User settings subcollection"
+    }
+  }
+}

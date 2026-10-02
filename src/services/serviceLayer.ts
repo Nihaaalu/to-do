@@ -76,23 +76,61 @@ export class TaskService {
     this.log(`[DSA LAYER] Re-synchronized in-memory custom data structures. Active: ${activeTasks.length}, Completed Queue: ${completedTasks.length}`);
   }
 
+  private unsubscribeRealtime?: () => void;
+
+  public startRealtimeSync(uid: string) {
+    if (this.unsubscribeRealtime) {
+      this.unsubscribeRealtime();
+      this.unsubscribeRealtime = undefined;
+    }
+
+    if (this.storageService.subscribeToTasks) {
+      this.log('[SERVICE LAYER] Connecting Universal Cloud Real-time synchronization with Firestore...');
+      this.unsubscribeRealtime = this.storageService.subscribeToTasks(
+        uid,
+        (cloudTasks) => {
+          const localJson = JSON.stringify(this.tasks.map(t => ({ id: t.taskId, s: t.status, t: t.title, d: t.dueDate, p: t.priority })));
+          const cloudJson = JSON.stringify(cloudTasks.map(t => ({ id: t.taskId, s: t.status, t: t.title, d: t.dueDate, p: t.priority })));
+          
+          if (localJson !== cloudJson) {
+            this.tasks = cloudTasks;
+            this.synchronizeDSA();
+            this.notifyUpdate();
+            this.log(`[CLOUD SYNC] Real-time updates synchronized from Cloud Firestore. Total items: ${cloudTasks.length}`);
+          }
+        },
+        (err) => {
+          this.log(`[CLOUD SYNC] Warning: Cloud sync listener notice: ${err?.message || err}`);
+        }
+      );
+    }
+  }
+
+  public stopRealtimeSync() {
+    if (this.unsubscribeRealtime) {
+      this.unsubscribeRealtime();
+      this.unsubscribeRealtime = undefined;
+      this.log('[SERVICE LAYER] Cloud Firestore real-time listener disconnected.');
+    }
+  }
+
   public async loadAll(uid: string): Promise<Task[]> {
-    this.log('[SERVICE LAYER] Loading task repository from Local Storage...');
+    this.log('[SERVICE LAYER] Loading task repository from Cloud Firestore...');
     const loaded = await this.storageService.loadTasks(uid);
     this.tasks = loaded;
     this.synchronizeDSA();
     this.notifyUpdate();
-    this.log(`[SERVICE LAYER] Task repository successfully loaded. Total items: ${loaded.length}`);
+    this.log(`[SERVICE LAYER] Task repository successfully loaded from Cloud Firestore. Total items: ${loaded.length}`);
     return this.tasks;
   }
 
   private async saveAll(uid: string): Promise<void> {
     try {
-      this.log('[SERVICE LAYER] Synchronizing current state with Local Storage...');
+      this.log('[SERVICE LAYER] Synchronizing current state with Cloud Firestore...');
       await this.storageService.saveTasks(uid, this.tasks);
-      this.log('[SERVICE LAYER] Local Storage persistence synchronized successfully.');
+      this.log('[SERVICE LAYER] Cloud Firestore persistence synchronized successfully.');
     } catch (err) {
-      this.log('[SERVICE LAYER] Warning: Failed to persist to Local Storage.');
+      this.log('[SERVICE LAYER] Warning: Failed to persist to Cloud Firestore.');
       console.error(err);
     }
   }
@@ -181,7 +219,11 @@ export class TaskService {
     this.log(`[DSA BINARY HEAP] Heapified task ID ${newTask.taskId} with priority ${newTask.priority} in O(log n).`);
 
     this.notifyUpdate();
-    await this.saveAll(uid);
+    if (this.storageService.saveTask) {
+      await this.storageService.saveTask(uid, newTask);
+    } else {
+      await this.saveAll(uid);
+    }
     return newTask;
   }
 
@@ -198,7 +240,11 @@ export class TaskService {
     this.log(`[SERVICE LAYER] Task ID ${taskId} removed and custom structures synchronized.`);
 
     this.notifyUpdate();
-    await this.saveAll(uid);
+    if (this.storageService.deleteTask) {
+      await this.storageService.deleteTask(uid, taskId);
+    } else {
+      await this.saveAll(uid);
+    }
   }
 
   public async editTask(uid: string, updatedTask: Task): Promise<void> {
@@ -279,7 +325,11 @@ export class TaskService {
     this.log(`[SERVICE LAYER] Task ID ${editedTask.taskId} edited and custom structures synchronized.`);
 
     this.notifyUpdate();
-    await this.saveAll(uid);
+    if (this.storageService.saveTask) {
+      await this.storageService.saveTask(uid, editedTask);
+    } else {
+      await this.saveAll(uid);
+    }
   }
 
   public async markComplete(uid: string, taskId: number): Promise<void> {
@@ -303,7 +353,11 @@ export class TaskService {
     this.log(`[SERVICE LAYER] Task ID ${taskId} completed and moved to accomplished queue.`);
 
     this.notifyUpdate();
-    await this.saveAll(uid);
+    if (this.storageService.saveTask) {
+      await this.storageService.saveTask(uid, completedTask);
+    } else {
+      await this.saveAll(uid);
+    }
   }
 
   public async revertComplete(uid: string, taskId: number): Promise<void> {
@@ -326,7 +380,11 @@ export class TaskService {
     this.log(`[SERVICE LAYER] Reverted task ID ${taskId} back to Pending status.`);
 
     this.notifyUpdate();
-    await this.saveAll(uid);
+    if (this.storageService.saveTask) {
+      await this.storageService.saveTask(uid, pendingTask);
+    } else {
+      await this.saveAll(uid);
+    }
   }
 
   public async loadProfile(uid: string) {

@@ -45,6 +45,9 @@ export interface IAuthService {
 export interface IStorageService {
   loadTasks(uid: string): Promise<Task[]>;
   saveTasks(uid: string, tasks: Task[]): Promise<void>;
+  saveTask?(uid: string, task: Task): Promise<void>;
+  deleteTask?(uid: string, taskId: number): Promise<void>;
+  subscribeToTasks?(uid: string, onUpdate: (tasks: Task[]) => void, onError?: (err: any) => void): () => void;
   
   loadSettings(uid: string): Promise<UserSettings>;
   saveSettings(uid: string, settings: UserSettings): Promise<void>;
